@@ -1,0 +1,29 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Candidate observers — 29 U.S.C. 481(c)</p>
+<h1>Observer station</h1>
+<p class="sub">Read-only visibility into every observable part of the process. You can see who has voted (never how), configurations, counts, and the tamper-evident audit log.</p>
+
+<div class="seal-strip">
+  <strong>Audit chain verification:</strong>
+  <% if (chain.ok) { %>intact — <%= chain.total %> entries verified.<% } else { %><span style="color:var(--signal)"><strong>BROKEN at entry #<%= chain.brokenAt %></strong> — the log has been altered. Report this immediately.</span><% } %>
+  <% if (chain.tip) { %><div class="tip">Chain tip: <%= chain.tip %></div><% } %>
+</div>
+
+<table>
+<tr><th>#</th><th>Vote</th><th>Status</th><th>Eligible</th><th>Voted</th><th>Sealed ballots</th><th>Redeemed creds</th><th></th></tr>
+<% elections.forEach(function (e) { %>
+<tr>
+  <td><%= e.id %></td>
+  <td><%= e.title %> <% if (e.is_test) { %><span class="tag test">Test</span><% } %></td>
+  <td><span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span></td>
+  <td><%= e.eligible %></td>
+  <td><%= e.turnout %></td>
+  <td><%= e.ballots %></td>
+  <td><%= e.redeemed %><%= e.ballots !== e.redeemed ? ' ⚠' : '' %></td>
+  <td><a href="/observe/elections/<%= e.id %>">Observe</a></td>
+</tr>
+<% }) %>
+</table>
+<p class="sub">The "sealed ballots" and "redeemed credentials" columns should always match — a mismatch is an integrity alert.</p>
+<%- include('../partials/foot') %>

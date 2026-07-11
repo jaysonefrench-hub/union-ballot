@@ -1,0 +1,19 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Key ceremony — shown exactly once</p>
+<h1>Distribute these key shares now</h1>
+<div class="notice warn">
+  <strong>These shares are NOT stored anywhere.</strong> When you leave this page they are gone.
+  Give one share to each keyholder (ideally with candidate observers watching), have each keyholder
+  store theirs privately, and do not keep a combined copy. Unsealing the ballots at the tally will
+  require <strong><%= threshold %></strong> of these shares. If fewer than <%= threshold %> shares
+  survive, the ballots can never be decrypted and the election must be rerun.
+</div>
+<% shares.forEach(function (s, i) { %>
+  <div class="share-box">
+    <span class="holder">Share <%= i + 1 %><%= keyholders[i] ? ' — ' + keyholders[i] : '' %></span>
+    <%= s %>
+  </div>
+<% }) %>
+<a class="btn primary" href="/admin/elections/<%= electionId %>">I have distributed the shares — continue</a>
+<%- include('../partials/foot') %>

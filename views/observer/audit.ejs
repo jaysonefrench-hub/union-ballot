@@ -1,0 +1,17 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Tamper-evident log</p>
+<h1>Audit log</h1>
+<div class="seal-strip">
+  <strong>Chain verification:</strong>
+  <% if (chain.ok) { %>intact — every one of <%= chain.total %> entries hashes correctly against its predecessor.<% } else { %><span style="color:var(--signal)"><strong>BROKEN at entry #<%= chain.brokenAt %></strong> — the log has been altered.</span><% } %>
+  <% if (chain.tip) { %><div class="tip">Chain tip: <%= chain.tip %></div><% } %>
+</div>
+<p class="sub">Ballot casting appears only as anonymous counter events — the log never records who cast which ballot or any ballot contents.</p>
+<table>
+<tr><th>#</th><th>When (UTC)</th><th>Actor</th><th>Event</th><th>Detail</th></tr>
+<% rows.forEach(function (r) { %>
+<tr><td><%= r.id %></td><td class="mono"><%= r.at %></td><td><%= r.actor %></td><td class="mono"><%= r.event %></td><td><%= r.detail || '' %></td></tr>
+<% }) %>
+</table>
+<%- include('../partials/foot') %>

@@ -1,0 +1,30 @@
+<% /* expects: results */ %>
+<div class="notice <%= results.integrity_ok ? 'seal' : 'warn' %>">
+  <strong>Integrity check:</strong>
+  <%= results.ballots_cast %> sealed ballots decrypted ·
+  <%= results.redeemed_credentials %> credentials redeemed ·
+  <%= results.failed_decrypts %> decryption failures —
+  <% if (results.integrity_ok) { %>counts match. <% } else { %><strong>MISMATCH — investigate via the audit log before certifying.</strong><% } %>
+  Remember to add any paper ballots (counted by hand with observers) to these electronic totals before certifying.
+</div>
+<% results.races.forEach(function (race) { %>
+  <h3><%= race.title %> <span class="sub" style="font-weight:400">(<%= race.seats %> seat<%= race.seats > 1 ? 's' : '' %>, <%= race.threshold.replace('_',' ') %> · <%= race.ballots_in_race %> ballots voted in this race)</span></h3>
+  <table>
+    <tr><th>Candidate / option</th><th>Votes</th><th>Share of ballots in race</th><th></th></tr>
+    <% race.standings.forEach(function (s) { %>
+      <tr class="<%= race.winners.includes(s.name) ? 'winner' : '' %>">
+        <td><%= s.name %></td>
+        <td><%= s.votes %></td>
+        <td><%= race.ballots_in_race ? Math.round(1000 * s.votes / race.ballots_in_race) / 10 + '%' : '—' %></td>
+        <td><%= race.winners.includes(s.name) ? (race.threshold === 'two_thirds' ? 'ADOPTED' : 'ELECTED') : '' %></td>
+      </tr>
+    <% }) %>
+  </table>
+  <% if (race.runoff_required) { %>
+    <div class="notice warn"><strong>No majority — runoff required</strong> between
+      <%= race.runoff_between.join(' and ') %> (IAFF sample CBL Art. on elections: runoff between the two candidates receiving the most votes).</div>
+  <% } %>
+  <% if (race.threshold === 'two_thirds' && race.winners.length === 0) { %>
+    <div class="notice"><strong>Not adopted</strong> — the leading option did not reach two-thirds of ballots cast on the question.</div>
+  <% } %>
+<% }) %>

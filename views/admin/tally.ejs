@@ -1,0 +1,20 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Tally ceremony</p>
+<h1>Unseal &amp; count: <%= e.title %></h1>
+<div class="notice seal">
+  Conduct this step like opening a ballot box: with candidate observers present (in person or on
+  video). Each keyholder pastes their own share below. Requires <strong><%= e.key_threshold %></strong>
+  of <%= e.key_shares_total %> shares. The reconstructed key is used in memory for this count and
+  discarded; ballots remain stored encrypted for the one-year retention period.
+</div>
+<form method="post" action="/admin/elections/<%= e.id %>/tally">
+  <% for (var i = 0; i < e.key_threshold; i++) { %>
+    <label>Key share <%= i + 1 %></label>
+    <textarea name="share" rows="2" required placeholder="SHARE-n-..."></textarea>
+  <% } %>
+  <label style="margin-top:16px"><input type="checkbox" required style="width:auto">
+    Candidate observers were notified of this tally and given the opportunity to be present.</label>
+  <button class="btn primary" type="submit">Unseal ballots and count</button>
+</form>
+<%- include('../partials/foot') %>

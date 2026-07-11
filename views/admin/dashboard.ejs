@@ -1,0 +1,26 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Election committee</p>
+<h1>Elections &amp; votes</h1>
+<p class="sub">Roster: <%= memberCount %> members · Credential delivery:
+<% if (smtp) { %>email (SMTP configured)<% } else { %><strong>SMTP not configured</strong> — credentials will be shown once for mail-merge delivery<% } %></p>
+<a class="btn primary" href="/admin/elections/new">Start a new vote</a>
+
+<h2>All votes</h2>
+<% if (elections.length === 0) { %>
+  <div class="notice">No votes yet. Import the member roster, then start a new vote. Consider running a <strong>test election</strong> first so candidate observers can verify the system records and tallies accurately — OLMS views observable test runs favorably.</div>
+<% } %>
+<table>
+<tr><th>#</th><th>Title</th><th>Kind</th><th>Status</th><th>Turnout</th><th></th></tr>
+<% elections.forEach(function (e) { %>
+<tr>
+  <td><%= e.id %></td>
+  <td><%= e.title %> <% if (e.is_test) { %><span class="tag test">Test</span><% } %></td>
+  <td><%= e.kind.replace(/_/g,' ') %></td>
+  <td><span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span></td>
+  <td><%= e.turnout %> / <%= e.eligible || '—' %></td>
+  <td><a href="/admin/elections/<%= e.id %>">Manage</a></td>
+</tr>
+<% }) %>
+</table>
+<%- include('../partials/foot') %>

@@ -1,0 +1,13 @@
+<%- include('partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Election committee &amp; observers</p>
+<h1>Sign in</h1>
+<p class="sub">Voters don't sign in — <a href="/">cast your ballot here</a> with your credential.</p>
+<form method="post" action="/login" style="max-width:380px">
+  <label for="u">Username</label>
+  <input id="u" type="text" name="username" required autocomplete="username">
+  <label for="p">Password</label>
+  <input id="p" type="password" name="password" required autocomplete="current-password">
+  <button class="btn primary" type="submit">Sign in</button>
+</form>
+<%- include('partials/foot') %>

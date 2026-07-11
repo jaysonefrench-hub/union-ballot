@@ -1,0 +1,11 @@
+# Never commit election data: the database holds hashed credentials,
+# encrypted ballots, and the audit log. It is an election record, not code.
+data/
+data-test/
+data-check/
+*.db
+*.db-wal
+*.db-shm
+
+node_modules/
+.env

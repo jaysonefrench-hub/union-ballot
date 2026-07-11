@@ -1,0 +1,102 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow"><%= e.kind.replace(/_/g,' ') %><%= e.is_test ? ' — test election' : '' %></p>
+<h1><%= e.title %></h1>
+<p>
+  <span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span>
+  <% if (e.is_test) { %><span class="tag test">Test</span><% } %>
+  · Ballot key: <%= e.key_threshold %>-of-<%= e.key_shares_total %> shares
+  <% if (e.iaff_legal_approval) { %> · IAFF Legal approval: <%= e.iaff_legal_approval %><% } %>
+  <% if (e.notice_sent_on) { %> · Notice sent <%= e.notice_sent_on %><% } %>
+  <% if (e.opens_at) { %> · Opens <%= e.opens_at %><% } %>
+  <% if (e.closes_at) { %> · Closes <%= e.closes_at %><% } %>
+</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= eligibleCount || '—' %></div><div class="l">Eligible</div></div>
+  <div class="stat"><div class="n"><%= credStats.total || 0 %></div><div class="l">Credentials issued</div></div>
+  <div class="stat"><div class="n"><%= turnout.length %></div><div class="l">Have voted</div></div>
+  <div class="stat"><div class="n"><%= ballotCount %></div><div class="l">Sealed ballots</div></div>
+</div>
+
+<% if (e.status === 'draft') { %>
+  <h2>1 · Issue credentials</h2>
+  <p>Eligibility is frozen from the roster at this moment. Random credentials are generated, stored only as hashes, and
+  <% if (smtp) { %>emailed to each eligible member.<% } else { %>shown to you once for delivery (SMTP not configured).<% } %>
+  Invite candidate observers to watch this step.</p>
+  <form method="post" action="/admin/elections/<%= e.id %>/issue-credentials">
+    <% if (smtp) { %>
+      <label><input type="radio" name="delivery" value="email" checked style="width:auto"> Email each member their credential</label>
+      <label><input type="radio" name="delivery" value="export" style="width:auto"> Show me a one-time export instead</label>
+    <% } %>
+    <button class="btn primary" type="submit">Issue credentials to eligible members</button>
+  </form>
+<% } %>
+
+<% if (e.status === 'credentials_issued') { %>
+  <h2>2 · Open voting</h2>
+  <form method="post" action="/admin/elections/<%= e.id %>/open"><button class="btn primary" type="submit">Open voting now</button></form>
+<% } %>
+
+<% if (e.status === 'open') { %>
+  <h2>Voting is open</h2>
+  <form method="post" action="/admin/elections/<%= e.id %>/close"
+        onsubmit="return confirm('Close voting? Members will no longer be able to cast ballots.')">
+    <button class="btn" type="submit">Close voting</button>
+  </form>
+<% } %>
+
+<% if (e.status === 'closed') { %>
+  <h2>3 · Tally ceremony</h2>
+  <p>Ballots are sealed. Gather <%= e.key_threshold %> keyholders and candidate observers.</p>
+  <a class="btn primary" href="/admin/elections/<%= e.id %>/tally">Begin tally ceremony</a>
+<% } %>
+
+<% if (results) { %>
+  <h2>Results</h2>
+  <%- include('../partials/results', { results: results }) %>
+  <p class="sub">Tallied <%= e.tallied_at %>. Publish results to the membership; preserve records one year.</p>
+<% } %>
+
+<% if (['credentials_issued','open'].includes(e.status)) { %>
+  <h2>Replace a lost credential</h2>
+  <p class="sub">Voids the member's old credential (if unredeemed) and issues a fresh one. Logged.</p>
+  <form method="post" action="/admin/elections/<%= e.id %>/reissue" class="row" style="align-items:flex-end">
+    <div style="max-width:320px">
+      <label>Member</label>
+      <select name="member_id">
+        <% eligibleMembers.filter(function (s) { return s.method === 'electronic'; }).forEach(function (s) { %>
+          <option value="<%= s.member_id %>"><%= s.name %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div><button class="btn" type="submit">Void &amp; reissue</button></div>
+  </form>
+<% } %>
+
+<% if (['open','closed'].includes(e.status) && paperMembers.length) { %>
+  <h2>Paper ballots (alternative method)</h2>
+  <p class="sub">Record receipt of a member's sealed paper ballot so they're marked as voted and can't also vote electronically in a future reissue. Count paper ballots by hand with observers and add them to the electronic totals.</p>
+  <form method="post" action="/admin/elections/<%= e.id %>/paper-received" class="row" style="align-items:flex-end">
+    <div style="max-width:320px">
+      <label>Member</label>
+      <select name="member_id">
+        <% paperMembers.forEach(function (m) { %><option value="<%= m.id %>"><%= m.name %></option><% }) %>
+      </select>
+    </div>
+    <div><button class="btn" type="submit">Record paper ballot received</button></div>
+  </form>
+<% } %>
+
+<h2>Who has voted (<%= turnout.length %>)</h2>
+<p class="sub">Observers may compile this list — it shows that a member voted, never how.</p>
+<table>
+<tr><th>Member</th><th>Date</th><th>Method</th></tr>
+<% turnout.forEach(function (t) { %>
+<tr><td><%= t.name %></td><td><%= t.voted_on %></td><td><%= t.method %></td></tr>
+<% }) %>
+</table>
+
+<h2>Records</h2>
+<a class="btn" href="/admin/elections/<%= e.id %>/archive">Export records archive (retain 1 year)</a>
+<%- include('../partials/foot') %>

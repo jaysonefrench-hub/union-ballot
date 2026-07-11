@@ -1,0 +1,16 @@
+<%- include('partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Ballot received</p>
+<h1>Your ballot was cast</h1>
+<p>Your ballot in <strong><%= election.title %></strong> was sealed and stored. Your credential is now spent and cannot be used again.</p>
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= turnout %></div><div class="l">Ballots cast so far</div></div>
+  <div class="stat"><div class="n"><%= eligible %></div><div class="l">Eligible voters</div></div>
+</div>
+<div class="notice seal">
+  For your protection, this page does not repeat your selections — a screen that echoes choices
+  can be used to pressure members into proving how they voted. Your ballot is encrypted and
+  unlinkable to you. For ballot secrecy, also delete the email that carried your credential.
+</div>
+<a class="btn" href="/">Done</a>
+<%- include('partials/foot') %>

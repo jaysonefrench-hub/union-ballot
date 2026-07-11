@@ -1,0 +1,30 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Eligibility is determined here, before credentials exist</p>
+<h1>Member roster</h1>
+<p class="sub">Only members in good standing receive credentials. Members without email (or flagged for paper) must be offered the alternative paper-ballot method — that's a legal requirement, not an option.</p>
+
+<h2>Import members</h2>
+<form method="post" action="/admin/members/import">
+  <label for="roster">One member per line: <span class="mono">Name, email, member number</span> (email and number optional)</label>
+  <textarea id="roster" name="roster" rows="6" placeholder="Jane Smith, jsmith@example.com, 1042&#10;Bob Jones, , 1043"></textarea>
+  <button class="btn" type="submit">Add to roster</button>
+</form>
+
+<h2>Roster (<%= members.length %>)</h2>
+<table>
+<tr><th>Name</th><th>Email</th><th>No.</th><th>Good standing</th><th>Paper ballot</th><th></th></tr>
+<% members.forEach(function (m) { %>
+<tr>
+  <form method="post" action="/admin/members/<%= m.id %>/update">
+  <td><%= m.name %></td>
+  <td><input type="email" name="email" value="<%= m.email || '' %>" style="min-width:200px"></td>
+  <td><%= m.member_number || '' %></td>
+  <td><select name="good_standing"><option value="1" <%= m.good_standing ? 'selected':'' %>>Yes</option><option value="0" <%= !m.good_standing ? 'selected':'' %>>No</option></select></td>
+  <td><select name="needs_paper_ballot"><option value="0" <%= !m.needs_paper_ballot ? 'selected':'' %>>No</option><option value="1" <%= m.needs_paper_ballot ? 'selected':'' %>>Yes</option></select></td>
+  <td><button class="btn small" type="submit">Save</button></td>
+  </form>
+</tr>
+<% }) %>
+</table>
+<%- include('../partials/foot') %>

@@ -1,0 +1,31 @@
+<%- include('partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Official secret ballot</p>
+<h1>Cast your ballot</h1>
+<p class="sub"><%= openCount %> vote<%= openCount === 1 ? ' is' : 's are' %> currently open.</p>
+
+<form method="post" action="/vote" autocomplete="off">
+  <label for="credential">Your one-time voting credential</label>
+  <input type="text" id="credential" name="credential" placeholder="XXXX-XXXX-XXXX-XXXX"
+         inputmode="latin" autocapitalize="characters" spellcheck="false" required
+         style="font-family: var(--font-mono); font-size: 20px; letter-spacing: .12em; max-width: 420px;">
+  <br>
+  <button class="btn primary" type="submit">Open my ballot</button>
+</form>
+
+<div class="notice seal">
+  <strong>Your vote is secret — by architecture, not by promise.</strong>
+  You never enter your name here. Your credential was randomly generated, and your ballot is
+  encrypted the instant it is cast and stored with no link to you, your credential, or the time
+  you voted. Not even the election committee or the system administrator can see how you voted:
+  opening the sealed ballots requires multiple key shares held by different people, and even then
+  ballots carry no identity. The committee can see <em>that</em> you voted (as election observers
+  are entitled to), never <em>how</em>.
+</div>
+
+<div class="notice">
+  Lost or never received your credential? Contact the election committee — they will void the old
+  one and issue a replacement. Per IAFF model rules, an alternative way to vote is available to any member who chooses not to
+  vote electronically — ask the committee for a paper ballot.
+</div>
+<%- include('partials/foot') %>

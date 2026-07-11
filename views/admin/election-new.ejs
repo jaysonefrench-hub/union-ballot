@@ -1,0 +1,117 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">New vote</p>
+<h1>Configure a vote</h1>
+
+<form method="post" action="/admin/elections/new">
+  <div class="row">
+    <div>
+      <label for="title">Title</label>
+      <input id="title" type="text" name="title" required placeholder="2026 Local Officer Election">
+    </div>
+    <div>
+      <label for="kind">Kind</label>
+      <select id="kind" name="kind">
+        <option value="officer_election">Officer election (secret ballot required)</option>
+        <option value="delegate_election">Delegate election (secret ballot required)</option>
+        <option value="dues_assessment">Dues / assessment vote (secret ballot required)</option>
+        <option value="contract_ratification">Contract ratification</option>
+        <option value="bylaw_amendment">Bylaw amendment</option>
+        <option value="budget">Budget approval</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="notice warn" id="iaffApprovalNotice">
+    <strong>IAFF Legal Department approval required.</strong> Per the IAFF <em>Best Practices and
+    Model Rules</em>, matters requiring a secret ballot under applicable law or the IAFF
+    Constitution — officer elections, delegate elections, and dues rate adjustments — default to
+    in-person or mail ballot. Before using electronic voting for these, your Local must obtain
+    approval of the voting platform and procedures from the IAFF Legal Department. Record that
+    approval below (or mark this vote as a test election for observer verification).
+    <label for="iaffApproval">IAFF Legal Department approval — date and reference</label>
+    <input id="iaffApproval" type="text" name="iaff_legal_approval" placeholder="e.g., Approved by IAFF Legal Dept, letter dated 2026-06-01, ref. L-1234">
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="notice">Written notice sent to members on (IAFF: at least 15 days before the election)</label>
+      <input id="notice" type="date" name="notice_sent_on">
+    </div>
+    <div>
+      <label for="opens">Voting opens</label>
+      <input id="opens" type="datetime-local" name="opens_at">
+    </div>
+    <div>
+      <label for="closes">Voting closes</label>
+      <input id="closes" type="datetime-local" name="closes_at">
+    </div>
+  </div>
+
+  <label style="margin-top:18px"><input type="checkbox" name="is_test" value="1" style="width:auto"> This is a <strong>test election</strong> (practice ballots for observer verification — clearly labeled, results don't count)</label>
+
+  <h2>Races / questions</h2>
+  <p class="sub">For a yes/no question (ratification, bylaw, budget), enter the question as the race title with candidates "Yes" and "No". Bylaw amendments typically require a two-thirds threshold — check your CBL.</p>
+  <div id="races"></div>
+  <button class="btn small" type="button" id="addRace">+ Add another race or question</button>
+
+  <h2>Key ceremony — who can unseal the ballots</h2>
+  <p class="sub">The ballot decryption key is split into shares. No ballots can ever be read unless the threshold number of keyholders act together. Choose keyholders from opposing camps plus a neutral (e.g., one representative per candidate slate + a neutral member).</p>
+  <div class="row">
+    <div>
+      <label for="kst">Total key shares</label>
+      <input id="kst" type="number" name="key_shares_total" value="5" min="2" max="15">
+    </div>
+    <div>
+      <label for="kth">Shares required to unseal (threshold)</label>
+      <input id="kth" type="number" name="key_threshold" value="3" min="2" max="15">
+    </div>
+  </div>
+  <label for="kh">Keyholder names/roles, one per line (recorded in the audit log)</label>
+  <textarea id="kh" name="keyholders" rows="4" placeholder="Rep. for Candidate Smith&#10;Rep. for Candidate Jones&#10;Neutral: retired member P. Alvarez"></textarea>
+
+  <button class="btn primary" type="submit">Create vote &amp; generate keys</button>
+</form>
+
+<script>
+(function () {
+  var wrap = document.getElementById('races');
+  var n = 0;
+  function addRace(title, cands, threshold) {
+    n++;
+    var d = document.createElement('div');
+    d.className = 'notice';
+    d.innerHTML =
+      '<div class="row"><div><label>Race / question title</label>' +
+      '<input type="text" name="race_title" value="' + (title || '') + '"></div>' +
+      '<div style="max-width:120px"><label>Seats</label><input type="number" name="race_seats" value="1" min="1"></div>' +
+      '<div style="max-width:220px"><label>Win threshold</label><select name="race_threshold">' +
+      '<option value="majority"' + (threshold === 'majority' ? ' selected' : '') + '>Majority (IAFF default, runoff if none)</option>' +
+      '<option value="two_thirds"' + (threshold === 'two_thirds' ? ' selected' : '') + '>Two-thirds</option>' +
+      '<option value="plurality">Plurality (top N)</option></select></div></div>' +
+      '<label>Candidates / options — one per line, in ballot order</label>' +
+      '<textarea name="race_candidates" rows="4">' + (cands || '') + '</textarea>';
+    wrap.appendChild(d);
+  }
+  document.getElementById('addRace').addEventListener('click', function () { addRace(); });
+  var SECRET_KINDS = ['officer_election', 'delegate_election', 'dues_assessment'];
+  var approvalNotice = document.getElementById('iaffApprovalNotice');
+  function syncApproval(kind) { approvalNotice.style.display = SECRET_KINDS.indexOf(kind) >= 0 ? '' : 'none'; }
+  syncApproval(document.getElementById('kind').value);
+  document.getElementById('kind').addEventListener('change', function () {
+    syncApproval(this.value);
+    if (wrap.children.length === 0 || (wrap.children.length === 1 && !wrap.querySelector('input[name=race_title]').value)) {
+      wrap.innerHTML = ''; n = 0;
+      var k = this.value;
+      if (k === 'contract_ratification') addRace('Shall the tentative agreement be ratified?', 'Yes — ratify\nNo — reject', 'majority');
+      else if (k === 'bylaw_amendment') addRace('Shall the proposed bylaw amendment be adopted?', 'Yes — adopt\nNo — reject', 'two_thirds');
+      else if (k === 'budget') addRace('Shall the proposed annual budget be approved?', 'Yes — approve\nNo — reject', 'majority');
+      else if (k === 'dues_assessment') addRace('Shall the proposed dues/assessment change be adopted?', 'Yes — adopt\nNo — reject', 'majority');
+      else addRace();
+    }
+  });
+  addRace();
+})();
+</script>
+<%- include('../partials/foot') %>

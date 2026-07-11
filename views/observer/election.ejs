@@ -1,0 +1,42 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Observing<%= e.is_test ? ' — test election' : '' %></p>
+<h1><%= e.title %></h1>
+<p>
+  <span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span>
+  · <%= e.kind.replace(/_/g,' ') %>
+  · Ballot key: <%= e.key_threshold %>-of-<%= e.key_shares_total %> shares
+  <% if (e.iaff_legal_approval) { %> · IAFF Legal approval: <%= e.iaff_legal_approval %><% } %>
+  <% if (e.notice_sent_on) { %> · Notice sent <%= e.notice_sent_on %><% } %>
+</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= eligible %></div><div class="l">Eligible</div></div>
+  <div class="stat"><div class="n"><%= credStats.total %></div><div class="l">Credentials</div></div>
+  <div class="stat"><div class="n"><%= credStats.used %></div><div class="l">Redeemed</div></div>
+  <div class="stat"><div class="n"><%= ballots %></div><div class="l">Sealed ballots</div></div>
+</div>
+<% if (Number(credStats.used) !== ballots) { %>
+<div class="notice warn"><strong>Integrity alert:</strong> redeemed credentials (<%= credStats.used %>) and sealed ballots (<%= ballots %>) do not match. Raise this with the election committee and check the audit log.</div>
+<% } %>
+
+<h2>Ballot configuration</h2>
+<% e.races.forEach(function (r) { %>
+  <h3><%= r.title %> (<%= r.seats %> seat<%= r.seats>1?'s':'' %>, <%= r.threshold.replace('_',' ') %>)</h3>
+  <ul><% r.candidates.forEach(function (c) { %><li><%= c.name %></li><% }) %></ul>
+<% }) %>
+<p class="sub">Keyholders of record: <%= (JSON.parse(e.keyholders || '[]').join('; ')) || 'not recorded' %></p>
+
+<% if (results) { %>
+  <h2>Results</h2>
+  <%- include('../partials/results', { results: results }) %>
+<% } %>
+
+<h2>Who has voted (<%= turnout.length %>)</h2>
+<table>
+<tr><th>Member</th><th>Date</th><th>Method</th></tr>
+<% turnout.forEach(function (t) { %>
+<tr><td><%= t.name %></td><td><%= t.voted_on %></td><td><%= t.method %></td></tr>
+<% }) %>
+</table>
+<%- include('../partials/foot') %>

@@ -1,0 +1,22 @@
+{
+  "name": "union-ballot",
+  "version": "1.0.0",
+  "description": "Secret-ballot electronic voting for IAFF locals, built to DOL/OLMS LMRDA guidance",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "smoke": "node scripts/smoke-test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "nodemailer": "^6.9.14",
+    "shamirs-secret-sharing": "^2.0.0",
+    "tweetnacl": "^1.0.3"
+  }
+}

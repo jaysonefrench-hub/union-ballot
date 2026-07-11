@@ -1,0 +1,15 @@
+<%- include('partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">First run</p>
+<h1>Create the committee admin account</h1>
+<p class="sub">This account manages elections but can never read a ballot — ballots are sealed to key shares held by keyholders you'll designate per election.</p>
+<form method="post" action="/setup" style="max-width:420px">
+  <label for="dn">Name (e.g., "Election Committee Chair")</label>
+  <input id="dn" type="text" name="display_name" required>
+  <label for="u">Username</label>
+  <input id="u" type="text" name="username" required autocomplete="username">
+  <label for="p">Password (10+ characters)</label>
+  <input id="p" type="password" name="password" minlength="10" required autocomplete="new-password">
+  <button class="btn primary" type="submit">Create account</button>
+</form>
+<%- include('partials/foot') %>
