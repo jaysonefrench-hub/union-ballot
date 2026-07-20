@@ -19,7 +19,7 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
-const { chainHash } = require('./crypto');
+const { chainHash, randomHex } = require('./crypto');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -90,7 +90,10 @@ CREATE TABLE IF NOT EXISTS candidates (
 
 /*
  * Credentials: one row per issued credential.
- *  - code_hash/salt: scrypt of the credential; plaintext is never stored.
+ *  - code_hash/salt: salted SHA-256 of the credential; plaintext is never
+ *    stored. A fast hash (rather than a slow KDF like scrypt/bcrypt) is
+ *    appropriate because credentials are uniformly random ~80-bit secrets,
+ *    so brute-forcing the space is infeasible regardless of hash speed.
  *  - member_ref: AES-256-GCM-encrypted member id, decryptable only with the
  *    REISSUE_KEY (held outside the DB), used solely to void-and-reissue a
  *    lost credential. It cannot connect to any ballot.
@@ -183,4 +186,30 @@ function verifyAuditChain() {
   return { ok: true, brokenAt: null, total: rows.length, tip: prevHash };
 }
 
-module.exports = { db, audit, verifyAuditChain };
+/* ---------------- reissue-key custody ---------------- */
+
+/*
+ * The reissue key decrypts the member<->credential map (never any ballot).
+ * In production it MUST be supplied out-of-band via the REISSUE_KEY env var:
+ * we refuse to auto-generate and store it in this database, because doing so
+ * would place the key inside the very election record it is meant to protect.
+ * Outside production (tests, local demos) we auto-generate and persist it for
+ * convenience.
+ */
+function getReissueKey() {
+  if (process.env.REISSUE_KEY) return process.env.REISSUE_KEY;
+  if (process.env.NODE_ENV === 'production') {
+    throw Object.assign(
+      new Error('REISSUE_KEY is not set. In production it must be provided as a 64-hex-char environment variable and kept outside the database; refusing to auto-generate it.'),
+      { publicMessage: 'Server is misconfigured: the reissue key is missing. Contact the administrator.' }
+    );
+  }
+  let r = db.prepare("SELECT value FROM settings WHERE key='reissue_key'").get();
+  if (!r) {
+    db.prepare("INSERT INTO settings (key,value) VALUES ('reissue_key', ?)").run(randomHex(32));
+    r = db.prepare("SELECT value FROM settings WHERE key='reissue_key'").get();
+  }
+  return r.value;
+}
+
+module.exports = { db, audit, verifyAuditChain, getReissueKey };
