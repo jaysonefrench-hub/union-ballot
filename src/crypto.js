@@ -1,5 +1,4 @@
 /**
-
  * crypto.js — Cryptographic core of the ballot secrecy architecture.
  *
  * Design goals (per DOL/OLMS Compliance Tip, "Electing Union Officers Using
