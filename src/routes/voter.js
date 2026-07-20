@@ -5,7 +5,7 @@
 'use strict';
 
 const express = require('express');
-const { db, audit } = require('../db');
+const { db, audit, getReissueKey } = require('../db');
 const {
   normalizeCredential, hashCredential, encryptBallot, aesDecrypt, randomId,
 } = require('../crypto');
@@ -86,7 +86,7 @@ module.exports = function voterRoutes({ flash }) {
         choices[race.id] = picked; // undervoting (including blank) is allowed
       }
 
-      const reissueKey = process.env.REISSUE_KEY || db.prepare("SELECT value FROM settings WHERE key='reissue_key'").get().value;
+      const reissueKey = getReissueKey();
       const memberId = Number(aesDecrypt(cred.member_ref, reissueKey));
 
       const cast = db.transaction(() => {
