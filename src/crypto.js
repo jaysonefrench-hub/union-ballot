@@ -1,4 +1,5 @@
 /**
+
  * crypto.js — Cryptographic core of the ballot secrecy architecture.
  *
  * Design goals (per DOL/OLMS Compliance Tip, "Electing Union Officers Using
@@ -171,6 +172,25 @@ function chainHash(prevHash, entryJson) {
   return crypto.createHash('sha256').update(prevHash + '|' + entryJson).digest('hex');
 }
 
+/* ------------------------------------------------------------------ */
+/* Cryptographically-random shuffle (used at tally)                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Return a new array that is a uniformly random permutation of `arr`,
+ * using a CSPRNG (Fisher–Yates with crypto.randomInt). Used to shuffle
+ * ballots before decryption so the tally reveals nothing about order,
+ * without relying on the non-cryptographic Math.random().
+ */
+function secureShuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function randomId() {
   return crypto.randomUUID();
 }
@@ -190,6 +210,7 @@ module.exports = {
   aesEncrypt,
   aesDecrypt,
   chainHash,
+  secureShuffle,
   randomId,
   randomHex,
 };
