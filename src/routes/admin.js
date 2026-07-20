@@ -13,22 +13,12 @@
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { db, audit, verifyAuditChain } = require('../db');
+const { db, audit, verifyAuditChain, getReissueKey } = require('../db');
 const {
   generateElectionKeys, combineShares, decryptBallot,
-  generateCredential, hashCredential, aesEncrypt, aesDecrypt, randomHex,
+  generateCredential, hashCredential, aesEncrypt, aesDecrypt, randomHex, secureShuffle,
 } = require('../crypto');
 const { smtpConfigured, sendCredentialEmail } = require('../mailer');
-
-function getReissueKey() {
-  if (process.env.REISSUE_KEY) return process.env.REISSUE_KEY;
-  let r = db.prepare("SELECT value FROM settings WHERE key='reissue_key'").get();
-  if (!r) {
-    db.prepare("INSERT INTO settings (key,value) VALUES ('reissue_key', ?)").run(randomHex(32));
-    r = db.prepare("SELECT value FROM settings WHERE key='reissue_key'").get();
-  }
-  return r.value;
-}
 
 function getElection(id) {
   const e = db.prepare('SELECT * FROM elections WHERE id=?').get(id);
@@ -325,7 +315,7 @@ module.exports = function adminRoutes({ flash }) {
       }
 
       /* Shuffle before decrypting so even the ceremony reveals no order. */
-      const shuffled = rows.map((r) => ({ r, k: Math.random() })).sort((a, b) => a.k - b.k).map((x) => x.r);
+      const shuffled = secureShuffle(rows);
       const ballots = [];
       let failed = 0;
       for (const row of shuffled) {
