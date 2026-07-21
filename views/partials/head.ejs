@@ -1,8 +1,41 @@
-<%= brand.org %> <% if (brand.local) { %><%= brand.local %> · <% } %><%= brand.system %>
-<% if (user && user.role === 'admin') { %> Elections Roster Accounts Audit log <% } else if (user && user.role === 'observer') { %> Observer station Audit log <% } %>
-<% if (user) { %> <%= user.name %> (<%= user.role %>)
-Sign out
-<% } else { %> Committee sign-in <% } %>
-<% if (flash) { %>
-<%= flash.text %>
-<% } %>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title><%= title %> — <%= brand.org %></title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="<%= brand.logo %>">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">
+    <img class="brand-logo" src="<%= brand.logo %>" alt="<%= brand.org %> logo">
+    <span class="brand-text">
+      <span class="brand-org"><%= brand.org %></span>
+      <span class="brand-sub"><% if (brand.local) { %><%= brand.local %> · <% } %><%= brand.system %></span>
+    </span>
+  </a>
+  <nav>
+    <% if (user && user.role === 'admin') { %>
+      <a href="/admin">Elections</a>
+      <a href="/admin/members">Roster</a>
+      <a href="/admin/users">Accounts</a>
+      <a href="/observe/audit">Audit log</a>
+    <% } else if (user && user.role === 'observer') { %>
+      <a href="/observe">Observer station</a>
+      <a href="/observe/audit">Audit log</a>
+    <% } %>
+  </nav>
+  <div class="who">
+    <% if (user) { %>
+      <span><%= user.name %> (<%= user.role %>)</span>
+      <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+    <% } else { %>
+      <a href="/login">Committee sign-in</a>
+    <% } %>
+  </div>
+</header>
+<main>
+<% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.text %></div><% } %>
