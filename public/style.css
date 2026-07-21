@@ -11,6 +11,7 @@
   --duty: #1B2A4A;
   --signal: #A6192E;
   --brass: #8A6D2F;
+  --gold: #C9A24B;   /* lighter brass, legible on navy */
   --ok: #2E6E4E;
   --muted: #6B6459;
   --line: #D8D2C4;
@@ -31,9 +32,14 @@ main { max-width: 880px; margin: 0 auto; padding: 24px 20px 80px; }
 .topbar {
   background: var(--duty); color: #EDEAE2;
   display: flex; align-items: center; gap: 18px; padding: 10px 20px;
+  border-top: 4px solid var(--gold);   /* official gold rule */
   font-family: var(--font-display); letter-spacing: .08em; text-transform: uppercase;
 }
-.topbar .brand { font-size: 18px; color: #fff; text-decoration: none; }
+.topbar .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand-logo { height: 44px; width: auto; display: block; flex: none; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.08; }
+.brand-org { font-size: 17px; color: #fff; letter-spacing: .06em; }
+.brand-sub { font-size: 10.5px; color: var(--gold); letter-spacing: .18em; }
 .topbar nav { display: flex; gap: 16px; flex-wrap: wrap; }
 .topbar a { color: #C9CFDD; text-decoration: none; font-size: 13px; }
 .topbar a:hover { color: #fff; }
@@ -122,3 +128,20 @@ tr.winner td { background: #F2EFE4; font-weight: 600; }
   main { padding: 16px 14px 60px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* branded footer */
+.sitefoot {
+  max-width: 880px; margin: 40px auto 0; padding: 18px 20px 40px;
+  border-top: 3px double var(--brass);
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: 12px; color: var(--muted);
+}
+.sitefoot .foot-org {
+  font-family: var(--font-display); text-transform: uppercase; letter-spacing: .12em;
+  color: var(--duty); font-size: 13px;
+}
+@media (max-width: 640px) {
+  .brand-logo { height: 36px; }
+  .brand-org { font-size: 15px; }
+  .brand-sub { display: none; }
+}
