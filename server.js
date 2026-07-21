@@ -14,6 +14,7 @@ const { db, audit } = require('./src/db');
 const { randomHex } = require('./src/crypto');
 
 const app = express();
+app.set('trust proxy', 1); // behind a hosting provider's HTTPS proxy (Render, etc.)
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
@@ -48,10 +49,25 @@ app.use(session({
   },
 }));
 
-/* Make user + flash available to all views */
+/*
+ * Branding — configurable via environment variables so the district/local name
+ * and logo can change without editing code. Drop your OFFICIAL logo artwork in
+ * public/ (e.g. public/logo.png) and point BRAND_LOGO at it; the shipped
+ * public/logo.svg is only a neutral placeholder to be replaced.
+ */
+const BRAND = {
+  org: process.env.BRAND_ORG || 'IAFF District 12',
+  local: process.env.BRAND_LOCAL || '',          // e.g. "Local 1234" (optional)
+  system: process.env.BRAND_SYSTEM || 'Secret Ballot',
+  logo: process.env.BRAND_LOGO || '/logo.png',
+  footer: process.env.BRAND_FOOTER || 'Conducted under the IAFF Constitution & By-Laws and applicable law.',
+};
+
+/* Make user + flash + branding available to all views */
 app.use((req, res, next) => {
   res.locals.user = req.session.user || null;
   res.locals.flash = req.session.flash || null;
+  res.locals.brand = BRAND;
   delete req.session.flash;
   next();
 });
