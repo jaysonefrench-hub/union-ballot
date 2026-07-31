@@ -12,6 +12,8 @@ const bcrypt = require('bcryptjs');
 
 const { db, audit } = require('./src/db');
 const { randomHex } = require('./src/crypto');
+
+/* ----- crash handlers: log the error, never the request ----- */
 process.on('unhandledRejection', (reason) => {
   const e = reason instanceof Error ? reason : new Error(String(reason));
   console.error('[unhandledRejection]', e.message);
@@ -23,6 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error(err.stack);
   process.exit(1);
 });
+
 const app = express();
 app.set('trust proxy', 1); // behind a hosting provider's HTTPS proxy (Render, etc.)
 app.set('view engine', 'ejs');
@@ -30,9 +33,13 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-/* Do not cache anything: ballots must never linger in shared caches. */
+/* Do not cache anything: ballots must never linger in shared caches.
+ * no-referrer keeps a credential out of any Referer header if one ever
+ * appears in a URL. */
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('X-Content-Type-Options', 'nosniff');
   next();
 });
 
@@ -44,7 +51,9 @@ function getSetting(key) {
 function setSetting(key, value) {
   db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
 }
-let sessionSecret = getSetting('session_secret');
+/* SESSION_SECRET may be supplied from the environment so it does not have to
+ * live inside the database file that gets backed up and retained. */
+let sessionSecret = process.env.SESSION_SECRET || getSetting('session_secret');
 if (!sessionSecret) { sessionSecret = randomHex(32); setSetting('session_secret', sessionSecret); }
 
 app.use(session({
@@ -130,7 +139,11 @@ app.post('/login', (req, res) => {
   const { username, password } = req.body;
   const u = db.prepare('SELECT * FROM users WHERE username=?').get((username || '').trim());
   if (!u || !bcrypt.compareSync(password || '', u.password_hash)) {
-    audit('system', 'auth.failed_login', `Failed sign-in attempt for username "${(username || '').trim()}"`);
+    /* The submitted username is deliberately NOT recorded: a voter who pastes a
+     * ballot credential into this box would otherwise write it into the
+     * permanent, observer-visible audit log. The attempt itself is the
+     * loggable event. */
+    audit('system', 'auth.failed_login', 'Failed sign-in attempt (submitted username not recorded)');
     flash(req, 'error', 'Sign-in failed. Check the username and password.');
     return res.redirect('/login');
   }
@@ -153,10 +166,57 @@ app.use('/admin', requireRole('admin'), require('./src/routes/admin')({ flash })
 app.use('/observe', requireRole('observer', 'admin'), require('./src/routes/observer')({ flash }));
 
 app.use((req, res) => res.status(404).render('error', { title: 'Not found', message: 'That page does not exist.' }));
+
+/* ----- error handler -----
+ * Ballot secrecy rule: an error raised on a voter-facing request must not put
+ * any submitted value into the console, the audit log, or the response. The
+ * credential and the plaintext choices arrive in the same POST body, so a
+ * single careless log line would create exactly the voter-to-vote link the
+ * whole system is built to prevent.
+ */
+function stackFramesOnly(stack) {
+  return String(stack || '')
+    .split('\n')
+    .filter((line) => /^\s+at\s/.test(line))
+    .slice(0, 12)
+    .join('\n');
+}
+
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
-  console.error(err);
-  audit('system', 'error', String(err.message || err).slice(0, 300));
-  res.status(500).render('error', { title: 'Something went wrong', message: err.publicMessage || 'The action could not be completed. The error was recorded in the audit log.' });
+  /* express.urlencoded attaches the raw request body to err.body when parsing
+   * fails. Drop it immediately so nothing downstream can reach it. */
+  if (err && err.body) delete err.body;
+
+  /* Signed-in admin/observer requests get full detail. Every other request —
+   * which includes every voter-facing page, and therefore ballot casting —
+   * gets none. This fails safe: a new voter route needs no configuration here. */
+  const signedIn = !!(req.session && req.session.user);
+  const routePath = String(req.originalUrl || '').split('?')[0]; // never log a query string
+  const safeMsg = String((err && err.message) || 'unknown error').slice(0, 200);
+
+  if (signedIn) {
+    console.error('[error]', req.method, routePath, '-', safeMsg);
+    if (err && err.stack) console.error(err.stack);
+  } else {
+    /* Message withheld; stack frames (file and line only) are kept so a
+     * failure is still diagnosable without exposing any submitted value. */
+    console.error('[error]', req.method, routePath, '- detail withheld (voter-facing route)');
+    if (err && err.stack) console.error(stackFramesOnly(err.stack));
+  }
+
+  try {
+    audit('system', 'error', signedIn
+      ? `${req.method} ${routePath} — ${safeMsg}`
+      : `${req.method} ${routePath} — detail withheld (voter-facing route)`);
+  } catch (_) {
+    /* An audit-write failure must never mask the original error. */
+  }
+
+  if (res.headersSent) return;
+  res.status(500).render('error', {
+    title: 'Something went wrong',
+    message: (err && err.publicMessage) || 'The action could not be completed. The error was recorded in the audit log.',
+  });
 });
 
 const PORT = Number(process.env.PORT || 3000);
