@@ -27,6 +27,44 @@ const nacl = require('tweetnacl');
 const sss = require('shamirs-secret-sharing');
 
 /* ------------------------------------------------------------------ */
+/* Memory hygiene helper                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Overwrite a Buffer or typed array with zeros.
+ *
+ * Honest scope: this narrows the window in which secret material sits in
+ * process memory. It does not eliminate it — the JavaScript engine may hold
+ * copies of strings and objects that cannot be reached or overwritten from
+ * application code. It is defense in depth, not a guarantee, and it is not a
+ * substitute for the architectural protections (threshold decryption, no
+ * voter-to-ballot join path) that the secrecy claim actually rests on.
+ */
+function zeroize(buf) {
+  if (buf && typeof buf.fill === 'function') buf.fill(0);
+}
+
+/**
+ * Validate a 256-bit hex key before use. Guards against the most likely
+ * real-world deployment error: a REISSUE_KEY environment variable that was
+ * truncated, padded with whitespace, or pasted with the wrong length. Without
+ * this check, the failure surfaces as an opaque "Invalid key length" from
+ * Node's cipher layer, potentially in the middle of an election.
+ *
+ * The error reports the LENGTH only — never any portion of the key itself.
+ */
+function assertKeyHex(keyHex, label) {
+  if (typeof keyHex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(keyHex.trim())) {
+    const got = typeof keyHex === 'string' ? `${keyHex.trim().length} characters` : typeof keyHex;
+    throw Object.assign(
+      new Error(`${label} must be exactly 64 hexadecimal characters (a 256-bit key); got ${got}.`),
+      { publicMessage: 'Server is misconfigured: the reissue key is missing or the wrong length. No ballot was affected. Contact the administrator.' }
+    );
+  }
+  return Buffer.from(keyHex.trim(), 'hex');
+}
+
+/* ------------------------------------------------------------------ */
 /* Election keypair + Shamir shares                                    */
 /* ------------------------------------------------------------------ */
 
@@ -40,11 +78,15 @@ function generateElectionKeys(shares, threshold) {
   const kp = nacl.box.keyPair();
   const secretBuf = Buffer.from(kp.secretKey);
   const shareBufs = sss.split(secretBuf, { shares, threshold });
-  return {
+  const result = {
     publicKey: Buffer.from(kp.publicKey).toString('base64'),
     // Shares are prefixed so keyholders can identify them later.
     shares: shareBufs.map((s, i) => `SHARE-${i + 1}-${s.toString('hex')}`),
   };
+  /* The private key now exists only inside the shares. Wipe our copies. */
+  zeroize(secretBuf);
+  zeroize(kp.secretKey);
+  return result;
 }
 
 /** Parse a share string back to its raw buffer. Accepts pasted whitespace. */
@@ -59,10 +101,16 @@ function parseShare(text) {
 function combineShares(shareTexts) {
   const bufs = shareTexts.map(parseShare);
   const secret = sss.combine(bufs);
+  bufs.forEach(zeroize);
   if (secret.length !== nacl.box.secretKeyLength) {
+    zeroize(secret);
     throw new Error('Combined shares did not produce a valid key. Check that each share is complete and from this election.');
   }
-  return new Uint8Array(secret);
+  const key = new Uint8Array(secret);
+  zeroize(secret);
+  /* CALLER CONTRACT: pass this key to zeroize() as soon as the tally is
+   * finished. It must never be written to a file, a log, or the database. */
+  return key;
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,16 +123,21 @@ function combineShares(shareTexts) {
  * immediately, so only holders of K key shares can ever decrypt.
  */
 function encryptBallot(ballotObj, electionPublicKeyB64) {
-  const message = Buffer.from(JSON.stringify(ballotObj), 'utf8');
+  const message = new Uint8Array(Buffer.from(JSON.stringify(ballotObj), 'utf8'));
   const eph = nacl.box.keyPair();
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
   const pub = new Uint8Array(Buffer.from(electionPublicKeyB64, 'base64'));
-  const boxed = nacl.box(new Uint8Array(message), nonce, pub, eph.secretKey);
-  return JSON.stringify({
+  const boxed = nacl.box(message, nonce, pub, eph.secretKey);
+  const sealed = JSON.stringify({
     e: Buffer.from(eph.publicKey).toString('base64'),
     n: Buffer.from(nonce).toString('base64'),
     c: Buffer.from(boxed).toString('base64'),
   });
+  /* Wipe the plaintext ballot and the ephemeral secret. Once the ephemeral
+   * secret is gone, not even this process can reopen what it just sealed. */
+  zeroize(message);
+  zeroize(eph.secretKey);
+  return sealed;
 }
 
 /** Decrypt one stored ballot with the reconstructed private key. */
@@ -97,13 +150,21 @@ function decryptBallot(stored, privateKey) {
     privateKey
   );
   if (!opened) throw new Error('A ballot failed to decrypt — possible tampering or wrong key shares.');
-  return JSON.parse(Buffer.from(opened).toString('utf8'));
+  const obj = JSON.parse(Buffer.from(opened).toString('utf8'));
+  zeroize(opened);
+  return obj;
 }
 
 /* ------------------------------------------------------------------ */
 /* Voting credentials                                                  */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Exactly 32 characters, and 32 divides 256 evenly — so the `% length`
+ * reduction below is perfectly uniform with no modulo bias. 16 characters at
+ * 5 bits each = exactly 80 bits of entropy. Do not add or remove characters
+ * from this alphabet without re-checking that property.
+ */
 const CRED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 
 /** Generate a human-typeable, high-entropy credential: XXXX-XXXX-XXXX-XXXX (~80 bits). */
@@ -114,6 +175,7 @@ function generateCredential() {
     out += CRED_ALPHABET[bytes[i] % CRED_ALPHABET.length];
     if (i % 4 === 3 && i !== 15) out += '-';
   }
+  zeroize(bytes);
   return out;
 }
 
@@ -123,9 +185,17 @@ function normalizeCredential(input) {
 
 /**
  * Salted hash of a credential for at-rest storage. SHA-256 is appropriate
- * here (rather than a slow KDF) because credentials are uniformly random
- * ~80-bit secrets — offline brute force of the space is infeasible — and
- * verification must be O(1)-fast at 2,000-member scale.
+ * here (rather than a slow KDF like scrypt or bcrypt) because credentials are
+ * uniformly random 80-bit secrets — offline brute force of that space is
+ * infeasible regardless of hash speed.
+ *
+ * NOTE ON LOOKUP COST: because each credential carries its own random salt,
+ * a credential cannot be looked up by index. Verification scans the live
+ * credentials for the open election and hashes each one, i.e. it is O(n) in
+ * roster size, not O(1). This is a deliberate trade — the per-credential salt
+ * means two members issued the same code would not produce the same stored
+ * hash — but it is the reason rate limiting on credential submission matters
+ * more here than in a typical login form.
  */
 function hashCredential(credential, salt) {
   const norm = normalizeCredential(credential);
@@ -147,20 +217,31 @@ function hashCredential(credential, salt) {
  */
 
 function aesEncrypt(plaintext, keyHex) {
-  const key = Buffer.from(keyHex, 'hex');
+  const key = assertKeyHex(keyHex, 'REISSUE_KEY');
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return [iv.toString('hex'), tag.toString('hex'), ct.toString('hex')].join(':');
+  const out = [iv.toString('hex'), tag.toString('hex'), ct.toString('hex')].join(':');
+  zeroize(key);
+  return out;
 }
 
 function aesDecrypt(payload, keyHex) {
-  const key = Buffer.from(keyHex, 'hex');
-  const [ivH, tagH, ctH] = payload.split(':');
+  const key = assertKeyHex(keyHex, 'REISSUE_KEY');
+  const [ivH, tagH, ctH] = String(payload || '').split(':');
+  if (!ivH || !tagH || !ctH) {
+    zeroize(key);
+    throw Object.assign(
+      new Error('Reissue-map entry is malformed or has been purged.'),
+      { publicMessage: 'That credential record is no longer available. Contact the election committee.' }
+    );
+  }
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivH, 'hex'));
   decipher.setAuthTag(Buffer.from(tagH, 'hex'));
-  return Buffer.concat([decipher.update(Buffer.from(ctH, 'hex')), decipher.final()]).toString('utf8');
+  const out = Buffer.concat([decipher.update(Buffer.from(ctH, 'hex')), decipher.final()]).toString('utf8');
+  zeroize(key);
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -190,6 +271,14 @@ function secureShuffle(arr) {
   return a;
 }
 
+/**
+ * Random ballot identifier. crypto.randomUUID() produces a version 4 UUID —
+ * 122 random bits, no timestamp and no counter. This is load-bearing: the
+ * ballots table is WITHOUT ROWID and keyed on this value, so if it were ever
+ * changed to a time-ordered identifier (UUID v1 or v7), physical storage
+ * order would silently become casting order and the secrecy guarantee would
+ * be defeated with no visible symptom. Do not change this.
+ */
 function randomId() {
   return crypto.randomUUID();
 }
@@ -212,4 +301,5 @@ module.exports = {
   secureShuffle,
   randomId,
   randomHex,
+  zeroize,
 };
