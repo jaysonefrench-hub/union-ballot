@@ -13,6 +13,12 @@
  *     one-vote and observable turnout) but holds no ballot reference.
  *
  *   - There is no foreign key, join path, or log entry connecting the two.
+ *
+ *   - The journal settings below matter as much as the schema: see the
+ *     comment on journal_mode. A ballot insert and a turnout insert share
+ *     one transaction (that is what makes double-voting impossible), so the
+ *     database must not leave behind any file recording which writes were
+ *     committed together.
  */
 'use strict';
 
@@ -24,7 +30,33 @@ const { chainHash, randomHex } = require('./crypto');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new Database(path.join(DATA_DIR, 'ballot.db'));
-db.pragma('journal_mode = WAL');
+
+/*
+ * BALLOT-SECRECY PRAGMAS — do not change these without reading this comment.
+ *
+ * journal_mode = DELETE (NOT WAL):
+ *   Casting a ballot writes the turnout row (which identifies the member) and
+ *   the sealed ballot row inside a single transaction. That single transaction
+ *   is required for one-person-one-vote: it is what makes a double-spend race
+ *   impossible. But WAL mode keeps a persistent `ballot.db-wal` file that
+ *   records which writes were committed together, which would pair each
+ *   member with the ballot committed alongside their turnout row — the exact
+ *   voter-to-vote link this system exists to prevent. In DELETE mode the
+ *   rollback journal is removed as soon as each transaction commits, so no
+ *   such artifact survives. The cost is reduced read/write concurrency, which
+ *   is irrelevant at union-local scale on a single instance.
+ *
+ * secure_delete = ON:
+ *   Overwrites deleted content instead of leaving it in freed pages. Required
+ *   because the database file is retained for one year as the election record,
+ *   and because the member<->credential map is purged after voting closes.
+ *
+ * synchronous = FULL:
+ *   The database IS the election record. Durability over speed.
+ */
+db.pragma('journal_mode = DELETE');
+db.pragma('secure_delete = ON');
+db.pragma('synchronous = FULL');
 db.pragma('foreign_keys = ON');
 
 db.exec(`
@@ -96,7 +128,8 @@ CREATE TABLE IF NOT EXISTS candidates (
  *    so brute-forcing the space is infeasible regardless of hash speed.
  *  - member_ref: AES-256-GCM-encrypted member id, decryptable only with the
  *    REISSUE_KEY (held outside the DB), used solely to void-and-reissue a
- *    lost credential. It cannot connect to any ballot.
+ *    lost credential. It cannot connect to any ballot. Set to '' by
+ *    purgeReissueMap() once voting closes and reissue is no longer possible.
  *  - redeemed_on: DATE ONLY (no time). Combined with the ballots table having
  *    no ordering information, redemption records cannot be correlated to
  *    individual ballots.
@@ -195,15 +228,25 @@ function verifyAuditChain() {
  * would place the key inside the very election record it is meant to protect.
  * Outside production (tests, local demos) we auto-generate and persist it for
  * convenience.
+ *
+ * Second guard: NODE_ENV is easy to forget on a hosting provider. So we also
+ * refuse to auto-generate once any non-test election exists in this database,
+ * regardless of NODE_ENV. A real election never gets the convenience path.
  */
+function realElectionExists() {
+  return !!db.prepare('SELECT id FROM elections WHERE is_test = 0 LIMIT 1').get();
+}
+
 function getReissueKey() {
   if (process.env.REISSUE_KEY) return process.env.REISSUE_KEY;
-  if (process.env.NODE_ENV === 'production') {
+
+  if (process.env.NODE_ENV === 'production' || realElectionExists()) {
     throw Object.assign(
-      new Error('REISSUE_KEY is not set. In production it must be provided as a 64-hex-char environment variable and kept outside the database; refusing to auto-generate it.'),
+      new Error('REISSUE_KEY is not set. For any non-test election it must be provided as a 64-hex-char environment variable and kept outside the database; refusing to auto-generate it.'),
       { publicMessage: 'Server is misconfigured: the reissue key is missing. Contact the administrator.' }
     );
   }
+
   let r = db.prepare("SELECT value FROM settings WHERE key='reissue_key'").get();
   if (!r) {
     db.prepare("INSERT INTO settings (key,value) VALUES ('reissue_key', ?)").run(randomHex(32));
@@ -212,4 +255,38 @@ function getReissueKey() {
   return r.value;
 }
 
-module.exports = { db, audit, verifyAuditChain, getReissueKey };
+/* ---------------- reissue-map purge ---------------- */
+
+/**
+ * Destroy the member<->credential map for one election once voting has closed.
+ *
+ * Reissuing a lost credential is only possible while voting is open, so after
+ * close the map has no remaining purpose — and keeping it is the one stored
+ * artifact that a stolen database plus a stolen REISSUE_KEY could exploit.
+ * Removing it before the tally ceremony eliminates that class of exposure
+ * entirely, and it is a strong, verifiable statement in a compliance packet.
+ *
+ * The hashed credentials, turnout list, sealed ballots, and audit log all
+ * remain intact for the one-year retention requirement. Only the encrypted
+ * name-to-credential pointer is destroyed.
+ *
+ * Refuses to run while voting is still open. Must be called from an
+ * authenticated admin route and recorded in the audit log by the caller.
+ */
+function purgeReissueMap(electionId) {
+  const e = db.prepare('SELECT id, status FROM elections WHERE id=?').get(electionId);
+  if (!e) throw new Error('No such election.');
+  if (e.status !== 'closed' && e.status !== 'tallied') {
+    throw Object.assign(
+      new Error('Refusing to purge the reissue map before voting is closed.'),
+      { publicMessage: 'Close voting first. While voting is open, the map is still needed to reissue a lost credential.' }
+    );
+  }
+  const info = db.prepare("UPDATE credentials SET member_ref='' WHERE election_id=? AND member_ref<>''").run(electionId);
+  /* VACUUM cannot run inside a transaction. With secure_delete = ON it
+   * rewrites the file so the purged values do not survive in freed pages. */
+  db.exec('VACUUM');
+  return info.changes;
+}
+
+module.exports = { db, audit, verifyAuditChain, getReissueKey, purgeReissueMap };
