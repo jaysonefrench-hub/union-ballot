@@ -12,7 +12,17 @@ const bcrypt = require('bcryptjs');
 
 const { db, audit } = require('./src/db');
 const { randomHex } = require('./src/crypto');
+process.on('unhandledRejection', (reason) => {
+  const e = reason instanceof Error ? reason : new Error(String(reason));
+  console.error('[unhandledRejection]', e.message);
+  if (e.stack) console.error(e.stack);
+});
 
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.message);
+  console.error(err.stack);
+  process.exit(1);
+});
 const app = express();
 app.set('trust proxy', 1); // behind a hosting provider's HTTPS proxy (Render, etc.)
 app.set('view engine', 'ejs');
