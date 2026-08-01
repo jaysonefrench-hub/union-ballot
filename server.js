@@ -1,7 +1,7 @@
 /**
- * server.js — Union Ballot: secret-ballot electronic voting for IAFF locals.
+ * server.js — Teller: secret-ballot electronic voting for union locals.
  * Built to the DOL/OLMS Compliance Tip on remote electronic voting (Dec 2024)
- * and the IAFF sample local Constitution & By-Laws election provisions.
+ * and to published union model rules for officer elections.
  */
 'use strict';
 
@@ -69,17 +69,35 @@ app.use(session({
 }));
 
 /*
- * Branding — configurable via environment variables so the district/local name
- * and logo can change without editing code. Drop your OFFICIAL logo artwork in
- * public/ (e.g. public/logo.png) and point BRAND_LOGO at it; the shipped
- * public/logo.svg is only a neutral placeholder to be replaced.
+ * Branding — every value is configurable by environment variable so a local
+ * can put its own name and seal on the ballot without editing code.
+ *
+ * AFFILIATION NOTE: the defaults below are deliberately vendor-neutral. This
+ * software is not affiliated with, endorsed by, or a product of any labor
+ * organization. Do not reintroduce any union's name, seal, insignia, or
+ * trademark as a shipped default — those marks belong to their owners, and a
+ * local that adopts this system sets its own identity through BRAND_ORG and
+ * BRAND_LOCAL at deployment time.
+ *
+ * Describing the standards this system is built to (DOL/OLMS guidance,
+ * published model rules) is a statement of conformance, not affiliation, and
+ * is accurate to make.
  */
 const BRAND = {
-  org: process.env.BRAND_ORG || 'IAFF District 12',
+  org: process.env.BRAND_ORG || 'Teller',
   local: process.env.BRAND_LOCAL || '',          // e.g. "Local 1234" (optional)
-  system: process.env.BRAND_SYSTEM || 'Secret Ballot',
-  logo: process.env.BRAND_LOGO || '/logo.png',
-  footer: process.env.BRAND_FOOTER || 'Conducted under the IAFF Constitution & By-Laws and applicable law.',
+  system: process.env.BRAND_SYSTEM || 'Secret ballot',
+  tagline: process.env.BRAND_TAGLINE || 'Secret-ballot elections for union locals',
+  logo: process.env.BRAND_LOGO || '/logo.svg',
+  footer: process.env.BRAND_FOOTER || 'Conducted under the local\'s constitution and by-laws and applicable law.',
+
+  /* Demo mode: set DEMO=1 on the public demonstration instance. Templates use
+   * this to show a standing notice on every page. Never set it on an instance
+   * that will hold a binding election, and never load a real roster into an
+   * instance where it is set. */
+  demo: process.env.DEMO === '1',
+  demoNotice: process.env.DEMO_NOTICE
+    || 'Demonstration site. Practice ballots only — nothing here is a real election, and no result is binding.',
 };
 
 /* Make user + flash + branding available to all views */
@@ -222,7 +240,8 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 const PORT = Number(process.env.PORT || 3000);
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Union Ballot running on http://localhost:${PORT}`);
+    console.log(`Teller running on http://localhost:${PORT}`);
+    if (BRAND.demo) console.log('DEMO MODE is on. Do not load a real roster into this instance.');
     if (!adminExists()) console.log(`First run: visit http://localhost:${PORT}/setup to create the election-committee admin account.`);
   });
 }
