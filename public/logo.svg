@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52" width="52" height="52" role="img" aria-label="Teller">
+  <title>Teller</title>
+  <desc>A five-stroke tally mark. Three strokes are inked and two are ghosted, representing the three-of-five keyholder threshold required to open a ballot.</desc>
+  <g fill="none" stroke-width="4" stroke-linecap="round">
+    <line x1="8" y1="10" x2="8" y2="42" stroke="#171F28"/>
+    <line x1="19" y1="10" x2="19" y2="42" stroke="#171F28"/>
+    <line x1="30" y1="10" x2="30" y2="42" stroke="#171F28"/>
+    <line x1="41" y1="10" x2="41" y2="42" stroke="#7F93A6" stroke-opacity="0.45"/>
+    <line x1="4" y1="43" x2="45" y2="9" stroke="#7F93A6" stroke-opacity="0.45"/>
+  </g>
+</svg>
