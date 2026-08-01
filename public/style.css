@@ -1,147 +1,232 @@
-/* Union Ballot — design tokens
-   paper  #FAF8F3  ballot stock
-   ink    #16181D  ballot ink
-   duty   #1B2A4A  fire-service navy (chrome, links)
-   signal #A6192E  crimson — cast action + alerts only
-   brass  #8A6D2F  seals, verified marks
+/* style.css — Teller design tokens
+   Independent product. No union name, seal, or insignia appears here.
+
+   The palette is drawn from a secrecy envelope: the cool grey-white of the
+   stock, the slate crosshatch printed inside so nothing can be read through
+   it, and the violet-blue of a notary's stamp pad.
+
+     paper  #F0F2F1  envelope stock (cool, not cream)
+     ink    #171F28  ballot ink
+     tint   #7F93A6  envelope crosshatch slate — chrome, links, quiet rules
+     seal   #3D3A6B  notarial violet — seals, verified marks, key custody
+     brick  #8C3A2E  ALERTS ONLY. Never decorative. When a member sees this
+                     colour it must mean something is wrong.
+
+   FONTS: loaded from Google Fonts in head.ejs. That is acceptable for the
+   demonstration instance. Before a binding election, self-host the font files
+   in public/fonts/ and swap the @font-face sources — a third-party request
+   from the ballot page reveals the voter's IP and referring page to that
+   third party, which is a poor fit for a system whose claim is that nothing
+   leaks. The stacks below degrade cleanly if the webfonts fail to load.
 */
 :root {
-  --paper: #FAF8F3;
-  --ink: #16181D;
-  --duty: #1B2A4A;
-  --signal: #A6192E;
-  --brass: #8A6D2F;
-  --gold: #C9A24B;   /* lighter brass, legible on navy */
-  --ok: #2E6E4E;
-  --muted: #6B6459;
-  --line: #D8D2C4;
-  --font-display: "Helvetica Neue Condensed", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
-  --font-ballot: Georgia, "Times New Roman", serif;
-  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Consolas, monospace;
+  --paper: #F0F2F1;
+  --ink: #171F28;
+  --tint: #7F93A6;
+  --seal: #3D3A6B;
+  --brick: #8C3A2E;
+  --ok: #2F5D46;
+  --muted: #5D6B78;
+  --line: #C9D0CE;
+  --rule: #A9B5BF;
+
+  /* Back-compatible aliases: older markup referencing these keeps working.
+     Prefer the semantic names above in new work. */
+  --duty: var(--ink);
+  --signal: var(--brick);
+  --brass: var(--seal);
+  --gold: var(--tint);
+
+  --font-display: Archivo, "Helvetica Neue", Arial, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-ballot: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--paper); color: var(--ink);
-  font-family: var(--font-ui); font-size: 16px; line-height: 1.55;
+  font-family: var(--font-ui); font-size: 16px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
-a { color: var(--duty); }
-main { max-width: 880px; margin: 0 auto; padding: 24px 20px 80px; }
+a { color: var(--seal); }
+main { max-width: 880px; margin: 0 auto; padding: 28px 20px 80px; }
 
-/* top chrome */
-.topbar {
-  background: var(--duty); color: #EDEAE2;
-  display: flex; align-items: center; gap: 18px; padding: 10px 20px;
-  border-top: 4px solid var(--gold);   /* official gold rule */
-  font-family: var(--font-display); letter-spacing: .08em; text-transform: uppercase;
+.skip-link {
+  position: absolute; left: -9999px; top: 0; background: var(--ink); color: #fff;
+  padding: 10px 16px; z-index: 100; font-size: 14px;
 }
-.topbar .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
-.brand-logo { height: 44px; width: auto; display: block; flex: none; }
-.brand-text { display: flex; flex-direction: column; line-height: 1.08; }
-.brand-org { font-size: 17px; color: #fff; letter-spacing: .06em; }
-.brand-sub { font-size: 10.5px; color: var(--gold); letter-spacing: .18em; }
-.topbar nav { display: flex; gap: 16px; flex-wrap: wrap; }
-.topbar a { color: #C9CFDD; text-decoration: none; font-size: 13px; }
-.topbar a:hover { color: #fff; }
-.topbar .who { margin-left: auto; font-size: 12px; color: #9AA5BE; display: flex; gap: 10px; align-items: center; }
+.skip-link:focus { left: 8px; top: 8px; }
+
+/* demo notice — only rendered when DEMO=1 */
+.demobar {
+  background: var(--seal); color: #EFEEF7;
+  font-family: var(--font-ui); font-size: 13px; line-height: 1.45;
+  padding: 9px 20px; text-align: center;
+}
+.demobar strong {
+  font-family: var(--font-display); font-weight: 600;
+  letter-spacing: .14em; text-transform: uppercase; font-size: 12px;
+  margin-right: 8px; color: #fff;
+}
+
+/* top chrome — light, like letterhead rather than an app header. The head rule
+   is the heavy ink line you find at the top of a printed ballot. */
+.topbar {
+  background: #fff; color: var(--ink);
+  display: flex; align-items: center; gap: 18px; padding: 12px 20px;
+  border-top: 4px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-ui);
+}
+.topbar .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; }
+.brand-logo { height: 42px; width: auto; display: block; flex: none; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+.brand-org {
+  font-family: var(--font-display); font-weight: 600; font-size: 20px;
+  color: var(--ink); letter-spacing: .17em; text-transform: uppercase;
+}
+.brand-sub {
+  font-size: 10.5px; color: var(--seal); letter-spacing: .16em;
+  text-transform: uppercase; margin-top: 4px;
+}
+.topbar nav { display: flex; gap: 18px; flex-wrap: wrap; }
+.topbar a { color: var(--muted); text-decoration: none; font-size: 13.5px; }
+.topbar a:hover { color: var(--ink); }
+.topbar .who { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; gap: 10px; align-items: center; }
 .topbar form { margin: 0; }
-.topbar button { background: none; border: 1px solid #46557A; color: #C9CFDD; padding: 3px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+.topbar button {
+  background: none; border: 1px solid var(--rule); color: var(--muted);
+  padding: 4px 11px; cursor: pointer; font: inherit; font-size: 12px;
+}
+.topbar button:hover { border-color: var(--ink); color: var(--ink); }
 
 /* the signature: ballot head */
-.ballot-head { margin: 8px 0 26px; }
+.ballot-head { margin: 10px 0 26px; }
 .ballot-head .bar { height: 7px; background: var(--ink); }
 .ballot-head .hairlines { border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); height: 4px; margin-top: 2px; }
 .eyebrow {
-  font-family: var(--font-display); text-transform: uppercase; letter-spacing: .28em;
-  font-size: 12px; color: var(--muted); margin: 14px 0 2px;
+  font-family: var(--font-display); text-transform: uppercase; letter-spacing: .26em;
+  font-size: 12px; font-weight: 600; color: var(--tint); margin: 16px 0 2px;
 }
-h1 { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .04em; font-size: 34px; margin: 2px 0 4px; line-height: 1.1; }
-h2 { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .06em; font-size: 20px; margin: 34px 0 10px; border-bottom: 2px solid var(--ink); padding-bottom: 4px; }
-h3 { font-family: var(--font-ui); font-size: 16px; margin: 20px 0 6px; }
+h1 {
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .1em; font-size: 31px; margin: 2px 0 6px; line-height: 1.14;
+}
+h2 {
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .12em; font-size: 18px; margin: 36px 0 10px;
+  border-bottom: 2px solid var(--ink); padding-bottom: 5px;
+}
+h3 { font-family: var(--font-ui); font-weight: 600; font-size: 16px; margin: 22px 0 6px; }
 .sub { color: var(--muted); margin-top: 0; }
 
 /* flash + notices */
-.flash { padding: 12px 14px; margin: 0 0 20px; border-left: 5px solid; font-size: 15px; }
-.flash.ok { border-color: var(--ok); background: #EDF4EF; }
-.flash.error { border-color: var(--signal); background: #F7ECEC; }
+.flash { padding: 12px 15px; margin: 0 0 20px; border-left: 5px solid; font-size: 15px; border-radius: 0; }
+.flash.ok { border-color: var(--ok); background: #E9F1EC; }
+.flash.error { border-color: var(--brick); background: #F6EBE9; }
 .notice { border: 1px solid var(--line); background: #fff; padding: 14px 16px; margin: 16px 0; font-size: 14.5px; }
-.notice.warn { border-left: 5px solid var(--signal); }
-.notice.seal { border-left: 5px solid var(--brass); }
+.notice.warn { border-left: 5px solid var(--brick); border-radius: 0; }
+.notice.seal { border-left: 5px solid var(--seal); border-radius: 0; }
 
 /* forms */
-label { display: block; font-size: 13.5px; margin: 14px 0 4px; font-weight: 600; }
+label { display: block; font-size: 13.5px; margin: 15px 0 5px; font-weight: 600; }
 input[type=text], input[type=password], input[type=email], input[type=date], input[type=datetime-local], input[type=number], select, textarea {
-  width: 100%; padding: 9px 10px; border: 1.5px solid var(--ink); background: #fff;
-  font: inherit; border-radius: 0;
+  width: 100%; padding: 10px 11px; border: 1.5px solid var(--ink); background: #fff;
+  font: inherit; border-radius: 0; color: var(--ink);
 }
+input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus { border-color: var(--seal); }
 textarea { font-family: var(--font-mono); font-size: 13.5px; }
 .btn {
-  display: inline-block; font-family: var(--font-display); text-transform: uppercase; letter-spacing: .1em;
+  display: inline-block; font-family: var(--font-display); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .12em;
   border: 2px solid var(--ink); background: #fff; color: var(--ink);
-  padding: 10px 22px; font-size: 15px; cursor: pointer; margin-top: 16px; text-decoration: none;
+  padding: 11px 24px; font-size: 14px; cursor: pointer; margin-top: 16px; text-decoration: none;
 }
-.btn:hover { background: var(--ink); color: var(--paper); }
-.btn.primary { background: var(--signal); border-color: var(--signal); color: #fff; }
-.btn.primary:hover { background: #871523; border-color: #871523; }
-.btn.small { padding: 5px 12px; font-size: 12px; margin-top: 0; }
+.btn:hover { background: var(--ink); color: #fff; }
+/* Filled ink, not red: brick is reserved for alerts so it keeps its meaning. */
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+.btn.primary:hover { background: #0D1319; border-color: #0D1319; }
+.btn.small { padding: 6px 13px; font-size: 12px; margin-top: 0; }
 .row { display: flex; gap: 18px; flex-wrap: wrap; }
 .row > div { flex: 1; min-width: 180px; }
 
 /* the ballot itself */
-.ballot { background: #fff; border: 1.5px solid var(--ink); padding: 28px 30px; font-family: var(--font-ballot); }
-.race { border-top: 2px solid var(--ink); padding: 18px 0 6px; margin-top: 18px; }
+.ballot { background: #fff; border: 1.5px solid var(--ink); padding: 30px 32px; font-family: var(--font-ballot); }
+.race { border-top: 2px solid var(--ink); padding: 20px 0 6px; margin-top: 20px; }
 .race:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
-.race h3 { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .05em; font-size: 19px; margin: 0; }
-.race .instr { font-style: italic; font-size: 14px; color: var(--muted); margin: 2px 0 10px; }
-.cand { display: flex; align-items: center; gap: 12px; padding: 9px 6px; border-bottom: 1px dotted var(--line); font-size: 17px; }
+.race h3 {
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .11em; font-size: 17px; margin: 0;
+}
+.race .instr { font-style: italic; font-size: 14px; color: var(--muted); margin: 3px 0 10px; }
+.cand { display: flex; align-items: center; gap: 13px; padding: 10px 6px; border-bottom: 1px dotted var(--line); font-size: 17px; }
 .cand input { width: 20px; height: 20px; accent-color: var(--ink); flex: none; }
 .cand label { margin: 0; font-weight: 400; font-size: 17px; font-family: var(--font-ballot); cursor: pointer; flex: 1; }
 
 /* tables */
 table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #fff; font-size: 14px; }
-th { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .07em; font-size: 12px; text-align: left; border-bottom: 2px solid var(--ink); padding: 8px; }
-td { border-bottom: 1px solid var(--line); padding: 7px 8px; vertical-align: top; }
-tr.winner td { background: #F2EFE4; font-weight: 600; }
-.mono { font-family: var(--font-mono); font-size: 12.5px; word-break: break-all; }
-.tag { display: inline-block; font-family: var(--font-display); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; padding: 2px 8px; border: 1px solid var(--ink); }
+th {
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .1em; font-size: 11.5px; text-align: left;
+  border-bottom: 2px solid var(--ink); padding: 9px 8px;
+}
+td { border-bottom: 1px solid var(--line); padding: 8px; vertical-align: top; }
+tr.winner td { background: #EDF0EF; font-weight: 600; }
+.mono { font-family: var(--font-mono); font-size: 12.5px; word-break: break-all; letter-spacing: .02em; }
+.tag {
+  display: inline-block; font-family: var(--font-display); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .1em; font-size: 11px;
+  padding: 3px 9px; border: 1px solid var(--ink);
+}
 .tag.open { background: var(--ok); border-color: var(--ok); color: #fff; }
-.tag.closed { background: var(--ink); color: var(--paper); }
-.tag.tallied { background: var(--brass); border-color: var(--brass); color: #fff; }
-.tag.test { background: #fff; color: var(--signal); border-color: var(--signal); }
+.tag.closed { background: var(--ink); color: #fff; }
+.tag.tallied { background: var(--seal); border-color: var(--seal); color: #fff; }
+.tag.test { background: #fff; color: var(--brick); border-color: var(--brick); }
 
 /* seal strip: audit chain tip */
-.seal-strip { border: 1px solid var(--brass); background: #FBF6E9; padding: 10px 14px; margin: 18px 0; font-size: 13px; }
-.seal-strip .tip { font-family: var(--font-mono); font-size: 11.5px; color: var(--brass); word-break: break-all; }
+.seal-strip { border: 1px solid var(--seal); background: #F1F0F7; padding: 11px 15px; margin: 18px 0; font-size: 13px; }
+.seal-strip .tip { font-family: var(--font-mono); font-size: 11.5px; color: var(--seal); word-break: break-all; }
 
-.stat-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 16px 0; }
-.stat { border: 1.5px solid var(--ink); background: #fff; padding: 12px 18px; min-width: 130px; }
-.stat .n { font-family: var(--font-display); font-size: 30px; line-height: 1; }
-.stat .l { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.stat-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+.stat { border: 1.5px solid var(--ink); background: #fff; padding: 13px 18px; min-width: 130px; }
+.stat .n { font-family: var(--font-display); font-weight: 600; font-size: 30px; line-height: 1; }
+.stat .l { font-size: 11.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-top: 4px; }
 
-.share-box { background: var(--ink); color: #E8E4D8; padding: 14px 16px; margin: 10px 0; font-family: var(--font-mono); font-size: 13px; word-break: break-all; }
-.share-box .holder { color: var(--brass); font-family: var(--font-display); text-transform: uppercase; letter-spacing: .1em; font-size: 12px; display: block; margin-bottom: 6px; }
-
-:focus-visible { outline: 3px solid var(--duty); outline-offset: 2px; }
-@media (max-width: 640px) {
-  h1 { font-size: 26px; }
-  .ballot { padding: 18px 16px; }
-  main { padding: 16px 14px 60px; }
+/* key shares — read aloud at the ceremony, so mono and generously spaced */
+.share-box {
+  background: var(--ink); color: #E6E9EC; padding: 15px 17px; margin: 10px 0;
+  font-family: var(--font-mono); font-size: 13px; word-break: break-all; letter-spacing: .03em;
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.share-box .holder {
+  color: var(--tint); font-family: var(--font-display); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .14em; font-size: 11.5px;
+  display: block; margin-bottom: 7px;
+}
+
+:focus-visible { outline: 3px solid var(--seal); outline-offset: 2px; }
 
 /* branded footer */
 .sitefoot {
-  max-width: 880px; margin: 40px auto 0; padding: 18px 20px 40px;
-  border-top: 3px double var(--brass);
-  display: flex; flex-direction: column; gap: 3px;
+  max-width: 880px; margin: 44px auto 0; padding: 18px 20px 40px;
+  border-top: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px;
   font-size: 12px; color: var(--muted);
 }
 .sitefoot .foot-org {
-  font-family: var(--font-display); text-transform: uppercase; letter-spacing: .12em;
-  color: var(--duty); font-size: 13px;
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .16em; color: var(--ink); font-size: 12.5px;
 }
+
 @media (max-width: 640px) {
-  .brand-logo { height: 36px; }
-  .brand-org { font-size: 15px; }
+  h1 { font-size: 24px; letter-spacing: .07em; }
+  h2 { font-size: 16px; }
+  .ballot { padding: 18px 16px; }
+  main { padding: 18px 14px 60px; }
+  .topbar { gap: 12px; padding: 10px 14px; }
+  .brand-logo { height: 34px; }
+  .brand-org { font-size: 16px; letter-spacing: .14em; }
   .brand-sub { display: none; }
+  .demobar { font-size: 12px; padding: 8px 14px; }
+  .stat { min-width: 110px; padding: 11px 14px; }
 }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
