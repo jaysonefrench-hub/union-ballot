@@ -1,4 +1,7 @@
-<% /* expects: results */ %>
+<% /* expects: results.
+      GUARDRAIL (do not remove): render PER-RACE AGGREGATES ONLY. Never add a
+      ballot-by-ballot table or any per-voter, cross-race detail here — doing so
+      would enable unique-pattern ("Italian") coercion. Aggregates only. */ %>
 <div class="notice <%= results.integrity_ok ? 'seal' : 'warn' %>">
   <strong>Integrity check:</strong>
   <%= results.ballots_cast %> sealed ballots decrypted ·
@@ -9,6 +12,9 @@
 </div>
 <% results.races.forEach(function (race) { %>
   <h3><%= race.title %> <span class="sub" style="font-weight:400">(<%= race.seats %> seat<%= race.seats > 1 ? 's' : '' %>, <%= race.threshold.replace('_',' ') %> · <%= race.ballots_in_race %> ballots voted in this race)</span></h3>
+  <% (race.secrecy_warnings || []).forEach(function (w) { %>
+    <div class="notice warn"><strong>Ballot-secrecy notice:</strong> <%= w %></div>
+  <% }) %>
   <table>
     <tr><th>Candidate / option</th><th>Votes</th><th>Share of ballots in race</th><th></th></tr>
     <% race.standings.forEach(function (s) { %>
