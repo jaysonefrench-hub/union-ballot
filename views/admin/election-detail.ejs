@@ -52,6 +52,21 @@
   <a class="btn primary" href="/admin/elections/<%= e.id %>/tally">Begin tally ceremony</a>
 <% } %>
 
+<% if (['closed','tallied'].includes(e.status)) { %>
+  <h2>Reissue map</h2>
+  <% if (reissueMapPresent) { %>
+    <p class="sub">Voting is closed, so a lost credential can no longer be reissued &mdash; the encrypted member-to-credential map now has no further purpose. Destroying it removes the one stored artifact that a stolen database plus a stolen reissue key could use to link a member to their credential. The hashed credentials, turnout list, sealed ballots, and audit log are all kept for the one-year record. This action is logged and cannot be undone. Do it after any final reissues, ideally before the tally ceremony.</p>
+    <form method="post" action="/admin/elections/<%= e.id %>/purge-reissue-map"
+          onsubmit="return confirm('Permanently destroy the member-to-credential reissue map for this election? This cannot be undone. Do this only after voting is closed and any last credential reissues are done.')">
+      <button class="btn" type="submit">Destroy reissue map</button>
+    </form>
+  <% } else if (reissueMapPurged) { %>
+    <p class="sub">The member-to-credential reissue map has been destroyed for this election. The stored name-to-credential link no longer exists in the database; see the audit log for the record.</p>
+  <% } else { %>
+    <p class="sub">No reissue map exists for this election to destroy.</p>
+  <% } %>
+<% } %>
+
 <% if (results) { %>
   <h2>Results</h2>
   <%- include('../partials/results', { results: results }) %>
