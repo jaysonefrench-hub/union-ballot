@@ -13,7 +13,7 @@
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { db, audit, verifyAuditChain, getReissueKey } = require('../db');
+const { db, audit, verifyAuditChain, getReissueKey, purgeReissueMap } = require('../db');
 const {
   generateElectionKeys, combineShares, decryptBallot,
   generateCredential, hashCredential, aesEncrypt, aesDecrypt, randomHex, secureShuffle,
@@ -156,9 +156,14 @@ module.exports = function adminRoutes({ flash }) {
       return { member_id: s.member_id, name: m ? m.name : `member #${s.member_id}`, method: s.method };
     });
     const paperMembers = db.prepare("SELECT * FROM members WHERE good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='')").all();
+    /* Reissue-map state: is the encrypted member<->credential map still present,
+     * or has it already been purged? Drives the post-close purge control. */
+    const rm = db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN member_ref<>'' THEN 1 ELSE 0 END) AS present FROM credentials WHERE election_id=?").get(e.id);
+    const reissueMapPresent = (rm.present || 0) > 0;
+    const reissueMapPurged = rm.total > 0 && (rm.present || 0) === 0;
     res.render('admin/election-detail', {
       title: e.title, e, credStats, ballotCount, turnout, eligibleCount: eligible.length, eligibleMembers,
-      paperMembers, smtp: smtpConfigured(),
+      paperMembers, smtp: smtpConfigured(), reissueMapPresent, reissueMapPurged,
       results: e.results_json ? JSON.parse(e.results_json) : null,
     });
   });
@@ -265,6 +270,34 @@ module.exports = function adminRoutes({ flash }) {
     audit(req.session.user.username, 'election.closed', `Election #${e.id} "${e.title}" closed to voting`);
     flash(req, 'ok', 'Voting is closed. The ballots remain sealed until the tally ceremony.');
     res.redirect(`/admin/elections/${e.id}`);
+  });
+
+  /* ---------------- purge the reissue map (after close) ----------------
+   * Destroys the encrypted member<->credential map once voting is closed, so
+   * a stolen database plus a stolen REISSUE_KEY can no longer link any member
+   * to their credential. Reissuing a lost credential is impossible after close,
+   * so the map has no remaining purpose. The hashed credentials, turnout list,
+   * sealed ballots, and audit log are all retained for the one-year record.
+   * purgeReissueMap() itself refuses to run while voting is open. */
+  router.post('/elections/:id/purge-reissue-map', (req, res, next) => {
+    try {
+      const e = getElection(req.params.id);
+      if (!['closed', 'tallied'].includes(e.status)) {
+        flash(req, 'error', 'Close voting before purging the reissue map.');
+        return res.redirect(`/admin/elections/${e.id}`);
+      }
+      const cleared = purgeReissueMap(e.id);
+      audit(req.session.user.username, 'election.reissue_map_purged',
+        `Election #${e.id} "${e.title}": member<->credential reissue map destroyed after close (${cleared} credential record(s) cleared). Hashed credentials, turnout, sealed ballots, and audit log retained.`);
+      flash(req, 'ok', cleared > 0
+        ? `Reissue map destroyed — ${cleared} record(s) cleared. The stored name-to-credential link no longer exists for this election.`
+        : 'The reissue map was already empty for this election; nothing to purge.');
+      res.redirect(`/admin/elections/${e.id}`);
+    } catch (err) {
+      /* purgeReissueMap throws with a publicMessage if voting is still open. */
+      if (err && err.publicMessage) { flash(req, 'error', err.publicMessage); return res.redirect(`/admin/elections/${req.params.id}`); }
+      next(err);
+    }
   });
 
   /* ---------------- record a paper ballot received ---------------- */
