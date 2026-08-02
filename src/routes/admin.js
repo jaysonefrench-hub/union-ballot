@@ -360,8 +360,23 @@ module.exports = function adminRoutes({ flash }) {
         return res.redirect(`/admin/elections/${e.id}/tally`);
       }
 
-      /* Count */
+      /* Count — PUBLISH PER-RACE AGGREGATES ONLY.
+       *
+       * GUARDRAIL (do not remove): results are tabulated one race at a time
+       * into per-candidate totals. The decrypted `ballots` array lives only in
+       * memory for this loop and is never persisted or rendered. Never add a
+       * ballot-by-ballot listing, or any per-voter record of how one member
+       * voted across races, to `results`, to the views, or to the archive:
+       * publishing the full slate on any single ballot would enable coercion by
+       * a unique-pattern ("Italian") attack, where a coercer assigns a member a
+       * distinctive combination and then confirms it in the output. Aggregates
+       * only, always. */
       const results = { races: [], ballots_cast: ballots.length, failed_decrypts: failed, redeemed_credentials: redeemed, integrity_ok: rows.length === redeemed && failed === 0 };
+      /* Below this many ballots in a race, the totals themselves can expose how
+       * individuals voted; we FLAG such a race rather than imply the seal hides
+       * it. Override per local with SECRECY_MIN_BALLOTS if a different floor is
+       * appropriate. */
+      const SECRECY_MIN_BALLOTS = Math.max(2, Number(process.env.SECRECY_MIN_BALLOTS || 5));
       for (const race of e.races) {
         const counts = new Map(race.candidates.map((c) => [c.id, 0]));
         let ballotsInRace = 0; let totalVotes = 0;
@@ -399,10 +414,29 @@ module.exports = function adminRoutes({ flash }) {
             runoffBetween = standings.slice(0, 2).map((s) => s.name);
           }
         }
+        /*
+         * SECRECY ARITHMETIC (task #4) — disclose, never pretend the seal
+         * solves it. Sealing protects HOW ballots are stored, not what the
+         * totals reveal. Two outcomes expose individuals no matter how well the
+         * ballots were encrypted, so we record a plain-language flag on the
+         * result itself (it therefore also lands in the one-year archive):
+         *   - a race with very few ballots (each voter becomes guessable);
+         *   - a unanimous single-choice race or question (every voter's choice
+         *     is then effectively public).
+         */
+        const secrecyWarnings = [];
+        if (ballotsInRace > 0 && ballotsInRace < SECRECY_MIN_BALLOTS) {
+          secrecyWarnings.push(`Only ${ballotsInRace} ballot${ballotsInRace === 1 ? '' : 's'} ${ballotsInRace === 1 ? 'was' : 'were'} cast in this race. With so few voters, ballot secrecy is not mathematically guaranteed no matter how the ballots were sealed.`);
+        }
+        const singleChoice = race.seats === 1 || race.threshold === 'two_thirds';
+        if (ballotsInRace > 0 && singleChoice && race.candidates.length > 1 && standings[0] && standings[0].votes === ballotsInRace) {
+          secrecyWarnings.push('Unanimous result: every member who voted in this race chose the same option, so each voter\u2019s choice is effectively public regardless of the ballot seal.');
+        }
         results.races.push({
           title: race.title, seats: race.seats, threshold: race.threshold,
           ballots_in_race: ballotsInRace, total_votes: totalVotes,
           standings, winners, runoff_required: runoffRequired, runoff_between: runoffBetween,
+          secrecy_warnings: secrecyWarnings,
         });
       }
 
