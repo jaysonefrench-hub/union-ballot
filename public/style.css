@@ -1,15 +1,15 @@
 /* style.css — Teller design tokens
    Independent product. No union name, seal, or insignia appears here.
 
-   The palette is drawn from a secrecy envelope: the cool grey-white of the
-   stock, the slate crosshatch printed inside so nothing can be read through
-   it, and the violet-blue of a notary's stamp pad.
+   The palette is the original warm ballot-stock scheme: cream paper, ballot
+   ink, fire-service navy for chrome and links, brass for seals and verified
+   marks, and crimson reserved strictly for alerts.
 
-     paper  #F0F2F1  envelope stock (cool, not cream)
-     ink    #171F28  ballot ink
-     tint   #7F93A6  envelope crosshatch slate — chrome, links, quiet rules
-     seal   #3D3A6B  notarial violet — seals, verified marks, key custody
-     brick  #8C3A2E  ALERTS ONLY. Never decorative. When a member sees this
+     paper  #FAF8F3  warm ballot stock
+     ink    #16181D  ballot ink
+     tint   #1B2A4A  fire-service navy — chrome, links, quiet rules
+     seal   #8A6D2F  brass — seals, verified marks, key custody
+     brick  #A6192E  ALERTS ONLY. Never decorative. When a member sees this
                      colour it must mean something is wrong.
 
    FONTS: loaded from Google Fonts in head.ejs. That is acceptable for the
@@ -20,22 +20,22 @@
    leaks. The stacks below degrade cleanly if the webfonts fail to load.
 */
 :root {
-  --paper: #F0F2F1;
-  --ink: #171F28;
-  --tint: #7F93A6;
-  --seal: #3D3A6B;
-  --brick: #8C3A2E;
-  --ok: #2F5D46;
-  --muted: #5D6B78;
-  --line: #C9D0CE;
-  --rule: #A9B5BF;
+  --paper: #FAF8F3;
+  --ink: #16181D;
+  --tint: #1B2A4A;
+  --seal: #8A6D2F;
+  --brick: #A6192E;
+  --ok: #2E6E4E;
+  --muted: #6B6459;
+  --line: #D8D2C4;
+  --rule: #C7BCA6;
 
   /* Back-compatible aliases: older markup referencing these keeps working.
      Prefer the semantic names above in new work. */
-  --duty: var(--ink);
+  --duty: var(--tint);
   --signal: var(--brick);
   --brass: var(--seal);
-  --gold: var(--tint);
+  --gold: var(--seal);
 
   --font-display: Archivo, "Helvetica Neue", Arial, sans-serif;
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -48,7 +48,7 @@ body {
   font-family: var(--font-ui); font-size: 16px; line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
-a { color: var(--seal); }
+a { color: var(--tint); }
 main { max-width: 880px; margin: 0 auto; padding: 28px 20px 80px; }
 
 .skip-link {
@@ -122,8 +122,8 @@ h3 { font-family: var(--font-ui); font-weight: 600; font-size: 16px; margin: 22p
 
 /* flash + notices */
 .flash { padding: 12px 15px; margin: 0 0 20px; border-left: 5px solid; font-size: 15px; border-radius: 0; }
-.flash.ok { border-color: var(--ok); background: #E9F1EC; }
-.flash.error { border-color: var(--brick); background: #F6EBE9; }
+.flash.ok { border-color: var(--ok); background: #EDF4EF; }
+.flash.error { border-color: var(--brick); background: #F7ECEC; }
 .notice { border: 1px solid var(--line); background: #fff; padding: 14px 16px; margin: 16px 0; font-size: 14.5px; }
 .notice.warn { border-left: 5px solid var(--brick); border-radius: 0; }
 .notice.seal { border-left: 5px solid var(--seal); border-radius: 0; }
@@ -134,7 +134,7 @@ input[type=text], input[type=password], input[type=email], input[type=date], inp
   width: 100%; padding: 10px 11px; border: 1.5px solid var(--ink); background: #fff;
   font: inherit; border-radius: 0; color: var(--ink);
 }
-input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus { border-color: var(--seal); }
+input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus { border-color: var(--tint); }
 textarea { font-family: var(--font-mono); font-size: 13.5px; }
 .btn {
   display: inline-block; font-family: var(--font-display); font-weight: 600;
@@ -143,9 +143,11 @@ textarea { font-family: var(--font-mono); font-size: 13.5px; }
   padding: 11px 24px; font-size: 14px; cursor: pointer; margin-top: 16px; text-decoration: none;
 }
 .btn:hover { background: var(--ink); color: #fff; }
-/* Filled ink, not red: brick is reserved for alerts so it keeps its meaning. */
-.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
-.btn.primary:hover { background: #0D1319; border-color: #0D1319; }
+/* Filled navy (the brand's fire-service "duty" colour) so the primary action
+   stands out as the important one. Deliberately NOT red: brick stays reserved
+   for alerts so it keeps its meaning. */
+.btn.primary { background: var(--tint); border-color: var(--tint); color: #fff; }
+.btn.primary:hover { background: #12203A; border-color: #12203A; }
 .btn.small { padding: 6px 13px; font-size: 12px; margin-top: 0; }
 .row { display: flex; gap: 18px; flex-wrap: wrap; }
 .row > div { flex: 1; min-width: 180px; }
@@ -171,7 +173,7 @@ th {
   border-bottom: 2px solid var(--ink); padding: 9px 8px;
 }
 td { border-bottom: 1px solid var(--line); padding: 8px; vertical-align: top; }
-tr.winner td { background: #EDF0EF; font-weight: 600; }
+tr.winner td { background: #F2EFE4; font-weight: 600; }
 .mono { font-family: var(--font-mono); font-size: 12.5px; word-break: break-all; letter-spacing: .02em; }
 .tag {
   display: inline-block; font-family: var(--font-display); font-weight: 600;
@@ -184,7 +186,7 @@ tr.winner td { background: #EDF0EF; font-weight: 600; }
 .tag.test { background: #fff; color: var(--brick); border-color: var(--brick); }
 
 /* seal strip: audit chain tip */
-.seal-strip { border: 1px solid var(--seal); background: #F1F0F7; padding: 11px 15px; margin: 18px 0; font-size: 13px; }
+.seal-strip { border: 1px solid var(--seal); background: #FBF6E9; padding: 11px 15px; margin: 18px 0; font-size: 13px; }
 .seal-strip .tip { font-family: var(--font-mono); font-size: 11.5px; color: var(--seal); word-break: break-all; }
 
 .stat-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
@@ -198,12 +200,12 @@ tr.winner td { background: #EDF0EF; font-weight: 600; }
   font-family: var(--font-mono); font-size: 13px; word-break: break-all; letter-spacing: .03em;
 }
 .share-box .holder {
-  color: var(--tint); font-family: var(--font-display); font-weight: 600;
+  color: #D9BE7E; font-family: var(--font-display); font-weight: 600;
   text-transform: uppercase; letter-spacing: .14em; font-size: 11.5px;
   display: block; margin-bottom: 7px;
 }
 
-:focus-visible { outline: 3px solid var(--seal); outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--tint); outline-offset: 2px; }
 
 /* branded footer */
 .sitefoot {
