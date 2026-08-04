@@ -12,13 +12,24 @@
      brick  #A6192E  ALERTS ONLY. Never decorative. When a member sees this
                      colour it must mean something is wrong.
 
-   FONTS: loaded from Google Fonts in head.ejs. That is acceptable for the
-   demonstration instance. Before a binding election, self-host the font files
-   in public/fonts/ and swap the @font-face sources — a third-party request
-   from the ballot page reveals the voter's IP and referring page to that
-   third party, which is a poor fit for a system whose claim is that nothing
-   leaks. The stacks below degrade cleanly if the webfonts fail to load.
+   FONTS: self-hosted from /fonts (see the @font-face rules below), NOT loaded
+   from a third party. A ballot page therefore makes no request to any outside
+   font host, so no voter's IP or referring page is disclosed to one. The files
+   are open-source (SIL OFL 1.1; see public/fonts/OFL.txt). The stacks below
+   degrade cleanly if a webfont ever fails to load.
 */
+/* Self-hosted webfonts — served from /fonts so nothing is requested from a
+   third-party font host. Licensing: public/fonts/OFL.txt. */
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/archivo-500.woff2') format('woff2'); }
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/archivo-600.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/ibm-plex-sans-400.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/ibm-plex-sans-500.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/ibm-plex-sans-600.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Serif'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/ibm-plex-serif-400.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Serif'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/ibm-plex-serif-500.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/ibm-plex-mono-400.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/ibm-plex-mono-500.woff2') format('woff2'); }
+
 :root {
   --paper: #FAF8F3;
   --ink: #16181D;
