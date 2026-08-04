@@ -10,6 +10,50 @@ const {
   normalizeCredential, hashCredential, encryptBallot, aesDecrypt, randomId,
 } = require('../crypto');
 
+/*
+ * ---- rate limit on credential submission ----
+ *
+ * Why this matters more here than usual: verifying a credential is O(n). Each
+ * credential carries its own random salt, so findLiveCredential() must hash the
+ * submitted code against EVERY live credential until one matches. Unlimited
+ * submissions would let a single source (a) burn CPU by forcing a full re-hash
+ * on every request, and (b) flood the permanent, observer-visible audit log
+ * with rejected-credential entries. The credential space is ~80 bits, so
+ * guessing is already infeasible; this is defense-in-depth against abuse and
+ * log-spam, and it is checked BEFORE the expensive lookup runs.
+ *
+ * Keyed by client IP (server.js sets 'trust proxy', so req.ip is the real
+ * voter address). Deliberately GENEROUS: several members may legitimately vote
+ * from one address (a single station or union hall), and locking out a shared
+ * connection is a worse failure than the abuse it prevents. Tune with
+ * VOTE_RATE_MAX / VOTE_RATE_WINDOW_MS. In-memory suffices for a single-instance
+ * union-scale deployment; nothing here is persisted or linked to any ballot.
+ */
+const RATE_WINDOW_MS = Math.max(1000, Number(process.env.VOTE_RATE_WINDOW_MS || 60000));
+const RATE_MAX = Math.max(5, Number(process.env.VOTE_RATE_MAX || 40));
+const rateHits = new Map(); // ip -> { count, resetAt, notified }
+
+function rateLimit(req) {
+  const now = Date.now();
+  const ip = req.ip || 'unknown';
+  let rec = rateHits.get(ip);
+  if (!rec || now >= rec.resetAt) {
+    rec = { count: 0, resetAt: now + RATE_WINDOW_MS, notified: false };
+    rateHits.set(ip, rec);
+  }
+  rec.count += 1;
+  /* Opportunistic cleanup so the map cannot grow without bound. */
+  if (rateHits.size > 5000) {
+    for (const [k, v] of rateHits) { if (now >= v.resetAt) rateHits.delete(k); }
+  }
+  if (rec.count > RATE_MAX) {
+    const firstBlock = !rec.notified;
+    rec.notified = true;
+    return { blocked: true, firstBlock, retryMs: Math.max(0, rec.resetAt - now) };
+  }
+  return { blocked: false, firstBlock: false, retryMs: 0 };
+}
+
 module.exports = function voterRoutes({ flash }) {
   const router = express.Router();
 
@@ -43,6 +87,12 @@ module.exports = function voterRoutes({ flash }) {
 
   /* Step 1: credential check → show the ballot (nothing is recorded yet). */
   router.post('/vote', (req, res) => {
+    const rl = rateLimit(req);
+    if (rl.blocked) {
+      if (rl.firstBlock) audit('voter-portal', 'vote.rate_limited', 'Credential submissions from one address exceeded the rate limit and are being throttled (address not recorded)');
+      flash(req, 'error', `Too many attempts from your connection. Please wait about ${Math.ceil(rl.retryMs / 1000)} seconds, then try again. If you keep seeing this, contact the election committee.`);
+      return res.redirect('/');
+    }
     const cred = findLiveCredential(req.body.credential);
     if (!cred) {
       audit('voter-portal', 'vote.credential_rejected', 'A credential was entered that did not match any live credential for an open vote');
@@ -65,6 +115,12 @@ module.exports = function voterRoutes({ flash }) {
    * store the encrypted, unlinkable ballot. */
   router.post('/vote/cast', (req, res, next) => {
     try {
+      const rl = rateLimit(req);
+      if (rl.blocked) {
+        if (rl.firstBlock) audit('voter-portal', 'vote.rate_limited', 'Ballot-cast submissions from one address exceeded the rate limit and are being throttled (address not recorded)');
+        flash(req, 'error', `Too many attempts from your connection. Please wait about ${Math.ceil(rl.retryMs / 1000)} seconds, then try again.`);
+        return res.redirect('/');
+      }
       const cred = findLiveCredential(req.body.credential);
       if (!cred || cred.redeemed) {
         flash(req, 'error', 'This credential is no longer valid (it may have just been used). No ballot was recorded from this submission.');
