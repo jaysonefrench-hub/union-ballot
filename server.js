@@ -12,6 +12,7 @@ const bcrypt = require('bcryptjs');
 
 const { db, audit } = require('./src/db');
 const { randomHex } = require('./src/crypto');
+const { SOURCE_HASH, SOURCE_FILE_COUNT, GIT_COMMIT, REPO_URL } = require('./src/sourcehash');
 
 /* ----- crash handlers: log the error, never the request ----- */
 process.on('unhandledRejection', (reason) => {
@@ -105,6 +106,9 @@ app.use((req, res, next) => {
   res.locals.user = req.session.user || null;
   res.locals.flash = req.session.flash || null;
   res.locals.brand = BRAND;
+  /* Deployed-code transparency: observers can compare this to an independent
+     build of the published source, and the commit to the public repository. */
+  res.locals.source = { hash: SOURCE_HASH, fileCount: SOURCE_FILE_COUNT, commit: GIT_COMMIT, repoUrl: REPO_URL };
   delete req.session.flash;
   next();
 });
@@ -241,6 +245,7 @@ const PORT = Number(process.env.PORT || 3000);
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Teller running on http://localhost:${PORT}`);
+    console.log(`Source fingerprint: ${SOURCE_HASH} (${SOURCE_FILE_COUNT} files)${GIT_COMMIT ? ' | commit ' + GIT_COMMIT.slice(0, 12) : ''}`);
     if (BRAND.demo) console.log('DEMO MODE is on. Do not load a real roster into this instance.');
     if (!adminExists()) console.log(`First run: visit http://localhost:${PORT}/setup to create the election-committee admin account.`);
   });
