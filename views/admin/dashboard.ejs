@@ -23,4 +23,8 @@
 </tr>
 <% }) %>
 </table>
+
+<h2>Backups</h2>
+<p class="sub">Download an encrypted snapshot of the entire election database (AES-256-GCM). Keep copies off-site: this is your record for the one-year retention duty. It contains <strong>no</strong> key shares and no plaintext election key, so it cannot be used to open ballots. Requires a <span class="mono">BACKUP_KEY</span> to be configured; restore with <span class="mono">scripts/decrypt-backup.js</span>.</p>
+<a class="btn" href="/admin/backup">Download encrypted backup</a>
 <%- include('../partials/foot') %>
