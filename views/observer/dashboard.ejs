@@ -10,6 +10,15 @@
   <% if (chain.tip) { %><div class="tip">Chain tip: <%= chain.tip %></div><% } %>
 </div>
 
+<div class="seal-strip">
+  <strong>Deployed code:</strong>
+  <% if (source.commit) { %>commit
+    <% if (source.repoUrl) { %><a class="mono" href="<%= source.repoUrl %>/commit/<%= source.commit %>"><%= source.commit.slice(0,12) %></a><% } else { %><span class="mono"><%= source.commit.slice(0,12) %></span><% } %>
+    · <% } %><%= source.fileCount %> source files fingerprinted.
+  <div class="tip">Source fingerprint (SHA-256): <%= source.hash %></div>
+  <p class="sub" style="margin-top:8px">Computed from the running server's own source at startup. Anyone can reproduce it from an independent copy of the published code (the exact method is documented in <span class="mono">src/sourcehash.js</span>) and compare it here — and compare the commit above against the public repository — to confirm the deployed server is the code that was reviewed.</p>
+</div>
+
 <table>
 <tr><th>#</th><th>Vote</th><th>Status</th><th>Eligible</th><th>Voted</th><th>Sealed ballots</th><th>Redeemed creds</th><th></th></tr>
 <% elections.forEach(function (e) { %>
