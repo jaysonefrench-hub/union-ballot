@@ -1,5 +1,5 @@
 /**
- * server.js — Teller: secret-ballot electronic voting for union locals.
+ * server.js — Union Ballot: secret-ballot electronic voting for union locals.
  * Built to the DOL/OLMS Compliance Tip on remote electronic voting (Dec 2024)
  * and to published union model rules for officer elections.
  */
