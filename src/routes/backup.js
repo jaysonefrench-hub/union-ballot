@@ -1,86 +1,51 @@
 /**
- * routes/backup.js — Encrypted, downloadable snapshot of the whole database.
+ * scripts/decrypt-backup.js — restore a Union Ballot encrypted backup (.ubk).
  *
- * WHY ENCRYPTED: a backup of the election database contains member names and
- * emails, turnout, hashed credentials, the (already-encrypted) reissue map,
- * results, and the audit log. It is retained for a year and may be copied
- * off-site, so it must never sit around as a readable file. Each backup is
- * sealed with AES-256-GCM under a committee-held BACKUP_KEY: a 256-bit hex key
- * supplied as an environment variable, kept OUTSIDE the database and separate
- * from REISSUE_KEY and SESSION_SECRET.
+ * Usage:
+ *   BACKUP_KEY=<64 hex chars> node scripts/decrypt-backup.js <input.ubk> <output.db>
  *
- * WHY IT CANNOT CONTAIN KEY SHARES: the election private key is split into
- * Shamir shares that are shown once at the key ceremony and NEVER written to
- * the database (the elections table records only the public key and the
- * keyholders' names). The private key is never stored either. A database
- * backup therefore cannot contain any share or plaintext election key — only
- * material that is already encrypted or non-secret.
- *
- * Restore with scripts/decrypt-backup.js.
+ * Produces a plain SQLite database file you can open with any SQLite tool.
+ * Uses only Node's built-in crypto — no dependencies, so it runs anywhere.
+ * The backup format is:  "UNIONBALLOT1\n" | iv(12) | gcmTag(16) | ciphertext
+ * (AES-256-GCM). See src/routes/backup.js for how backups are created.
  */
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const crypto = require('crypto');
-const express = require('express');
-const { db, audit } = require('../db');
 
-const MAGIC = Buffer.from('UNIONBALLOT1\n', 'utf8'); // file-format marker + version
+const MAGIC = Buffer.from('UNIONBALLOT1\n', 'utf8');
+const [, , inFile, outFile] = process.argv;
 
-function backupKey() {
-  const k = (process.env.BACKUP_KEY || '').trim();
-  if (!/^[0-9a-fA-F]{64}$/.test(k)) {
-    throw Object.assign(
-      new Error('BACKUP_KEY must be exactly 64 hexadecimal characters (a 256-bit key).'),
-      { publicMessage: 'Encrypted backups are not configured. Set a 64-hex-character BACKUP_KEY environment variable (kept off the server, separate from the reissue key). No backup was created.' }
-    );
-  }
-  return Buffer.from(k, 'hex');
+if (!inFile || !outFile) {
+  console.error('Usage: BACKUP_KEY=<64 hex chars> node scripts/decrypt-backup.js <input.ubk> <output.db>');
+  process.exit(2);
+}
+const keyHex = (process.env.BACKUP_KEY || '').trim();
+if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
+  console.error('Set BACKUP_KEY to the 64-hexadecimal-character key that was used to create this backup.');
+  process.exit(2);
 }
 
-/*
- * Consistent snapshot of the live database, sealed as:
- *   MAGIC | iv(12) | tag(16) | ciphertext
- * The snapshot uses SQLite's online-backup API, so it is internally
- * consistent even if taken while the application is running.
- */
-async function createEncryptedBackup() {
-  const key = backupKey();
-  const tmp = path.join(os.tmpdir(), `unionballot-snap-${crypto.randomUUID()}.db`);
-  try {
-    await db.backup(tmp);
-    const plain = fs.readFileSync(tmp);
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    const ct = Buffer.concat([cipher.update(plain), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    plain.fill(0);
-    key.fill(0);
-    return Buffer.concat([MAGIC, iv, tag, ct]);
-  } finally {
-    try { fs.unlinkSync(tmp); } catch (_) { /* temp snapshot may already be gone */ }
-  }
+const buf = fs.readFileSync(inFile);
+if (buf.length < MAGIC.length + 12 + 16 || !buf.subarray(0, MAGIC.length).equals(MAGIC)) {
+  console.error('That does not look like a Union Ballot backup file (bad header).');
+  process.exit(1);
 }
 
-module.exports = function backupRoutes({ flash }) {
-  const router = express.Router();
+let off = MAGIC.length;
+const iv = buf.subarray(off, off + 12); off += 12;
+const tag = buf.subarray(off, off + 16); off += 16;
+const ct = buf.subarray(off);
 
-  router.get('/backup', async (req, res, next) => {
-    try {
-      const buf = await createEncryptedBackup();
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '');
-      audit(req.session.user.username, 'backup.exported',
-        `Encrypted database backup downloaded (AES-256-GCM under BACKUP_KEY, ${buf.length} bytes). Contains no key shares and no plaintext election key.`);
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="union-ballot-backup-${stamp}.ubk"`);
-      res.send(buf);
-    } catch (err) {
-      if (err && err.publicMessage) { flash(req, 'error', err.publicMessage); return res.redirect('/admin'); }
-      next(err);
-    }
-  });
-
-  return router;
-};
+const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(keyHex, 'hex'), iv);
+decipher.setAuthTag(tag);
+let plain;
+try {
+  plain = Buffer.concat([decipher.update(ct), decipher.final()]);
+} catch (e) {
+  console.error('Decryption failed — wrong BACKUP_KEY, or the file is corrupt or was tampered with.');
+  process.exit(1);
+}
+fs.writeFileSync(outFile, plain);
+console.log(`Wrote ${plain.length} bytes to ${outFile}. Open it with any SQLite tool.`);
