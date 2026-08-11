@@ -85,7 +85,7 @@ app.use(session({
  * is accurate to make.
  */
 const BRAND = {
-  org: process.env.BRAND_ORG || 'Teller',
+  org: process.env.BRAND_ORG || 'Union Ballot',
   local: process.env.BRAND_LOCAL || '',          // e.g. "Local 1234" (optional)
   system: process.env.BRAND_SYSTEM || 'Secret ballot',
   tagline: process.env.BRAND_TAGLINE || 'Secret-ballot elections for union locals',
@@ -245,7 +245,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 const PORT = Number(process.env.PORT || 3000);
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Teller running on http://localhost:${PORT}`);
+    console.log(`Union Ballot running on http://localhost:${PORT}`);
     console.log(`Source fingerprint: ${SOURCE_HASH} (${SOURCE_FILE_COUNT} files)${GIT_COMMIT ? ' | commit ' + GIT_COMMIT.slice(0, 12) : ''}`);
     if (BRAND.demo) console.log('DEMO MODE is on. Do not load a real roster into this instance.');
     if (!adminExists()) console.log(`First run: visit http://localhost:${PORT}/setup to create the election-committee admin account.`);
