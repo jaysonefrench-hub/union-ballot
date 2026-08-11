@@ -1,4 +1,4 @@
-FONTS BUNDLED WITH TELLER — LICENSE
+FONTS BUNDLED WITH UNION BALLOT — LICENSE
 ===================================
 
 The webfonts in this folder are self-hosted (served from this application)
