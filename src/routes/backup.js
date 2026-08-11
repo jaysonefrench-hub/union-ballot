@@ -27,7 +27,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { db, audit } = require('../db');
 
-const MAGIC = Buffer.from('TELLERBK1\n', 'utf8'); // file-format marker + version
+const MAGIC = Buffer.from('UNIONBALLOT1\n', 'utf8'); // file-format marker + version
 
 function backupKey() {
   const k = (process.env.BACKUP_KEY || '').trim();
@@ -48,7 +48,7 @@ function backupKey() {
  */
 async function createEncryptedBackup() {
   const key = backupKey();
-  const tmp = path.join(os.tmpdir(), `teller-snap-${crypto.randomUUID()}.db`);
+  const tmp = path.join(os.tmpdir(), `unionballot-snap-${crypto.randomUUID()}.db`);
   try {
     await db.backup(tmp);
     const plain = fs.readFileSync(tmp);
@@ -74,7 +74,7 @@ module.exports = function backupRoutes({ flash }) {
       audit(req.session.user.username, 'backup.exported',
         `Encrypted database backup downloaded (AES-256-GCM under BACKUP_KEY, ${buf.length} bytes). Contains no key shares and no plaintext election key.`);
       res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="teller-backup-${stamp}.tellerbk"`);
+      res.setHeader('Content-Disposition', `attachment; filename="union-ballot-backup-${stamp}.ubk"`);
       res.send(buf);
     } catch (err) {
       if (err && err.publicMessage) { flash(req, 'error', err.publicMessage); return res.redirect('/admin'); }
