@@ -8,7 +8,11 @@ const express = require('express');
 const { db, audit, getReissueKey } = require('../db');
 const {
   normalizeCredential, hashCredential, encryptBallot, aesDecrypt, randomId,
+  hashVerifyToken,
 } = require('../crypto');
+
+/* A verification link older than this is dead; the committee resends. */
+const VERIFY_TOKEN_TTL_DAYS = Math.max(1, Number(process.env.VERIFY_TOKEN_TTL_DAYS || 14));
 
 /*
  * ---- rate limit on credential submission ----
@@ -83,6 +87,34 @@ module.exports = function voterRoutes({ flash }) {
   router.get('/', (req, res) => {
     const openCount = db.prepare("SELECT COUNT(*) AS n FROM elections WHERE status='open'").get().n;
     res.render('home', { title: 'Cast your ballot', openCount });
+  });
+
+  /* ---- email verification (pre-credential; carries no ballot secret) ----
+   * A member clicks the link from their verification email. The token is
+   * single-use (cleared on success), expires, and is stored only as a hash.
+   * The token value itself is never audited or logged. */
+  router.get('/verify-email', (req, res) => {
+    const token = String(req.query.token || '').trim();
+    const fail = (message) => res.status(400).render('verify-email', { title: 'Email confirmation', ok: false, message });
+    if (!/^[0-9a-f]{32}$/i.test(token)) {
+      return fail('This confirmation link is not valid. Check that the full link was copied, or ask the election committee to resend it.');
+    }
+    const m = db.prepare('SELECT * FROM members WHERE email_verify_token_hash=?').get(hashVerifyToken(token));
+    if (!m) {
+      audit('voter-portal', 'member.email_verify_rejected', 'An email confirmation link was opened that did not match any pending confirmation (token not recorded)');
+      return fail('This confirmation link is not valid or was already used. If you have not confirmed your email yet, ask the election committee to resend the link.');
+    }
+    const sentAt = m.email_verify_sent_at ? new Date(m.email_verify_sent_at.replace(' ', 'T') + 'Z') : null;
+    if (!sentAt || (Date.now() - sentAt.getTime()) > VERIFY_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000) {
+      return fail('This confirmation link has expired. Ask the election committee to resend it.');
+    }
+    db.prepare("UPDATE members SET email_verified=1, email_verified_at=datetime('now'), email_verify_token_hash=NULL WHERE id=?").run(m.id);
+    audit('voter-portal', 'member.email_verified', `Member #${m.id} (${m.name}) confirmed their email address for electronic ballot delivery`);
+    return res.render('verify-email', {
+      title: 'Email confirmed',
+      ok: true,
+      message: `Thank you, ${m.name}. Your email address is confirmed for electronic ballot delivery. When voting opens you will receive your one-time voting credential at this address. Nothing else is required now.`,
+    });
   });
 
   /* Step 1: credential check → show the ballot (nothing is recorded yet). */

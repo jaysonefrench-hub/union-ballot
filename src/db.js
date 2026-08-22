@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+/*
+ * Members: email_verified gates ELECTRONIC credential delivery only. A member
+ * on the paper-ballot path never needs a verified email. The verification
+ * token is stored only as a SHA-256 hash (the plaintext exists only in the
+ * verification email / one-time link screen), is single-use, and expires.
+ */
 CREATE TABLE IF NOT EXISTS members (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -81,6 +87,10 @@ CREATE TABLE IF NOT EXISTS members (
   member_number TEXT,
   good_standing INTEGER NOT NULL DEFAULT 1,
   needs_paper_ballot INTEGER NOT NULL DEFAULT 0,
+  email_verified INTEGER NOT NULL DEFAULT 0,
+  email_verified_at TEXT,
+  email_verify_token_hash TEXT,
+  email_verify_sent_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -88,6 +98,9 @@ CREATE TABLE IF NOT EXISTS elections (
   id INTEGER PRIMARY KEY,
   title TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('officer_election','delegate_election','dues_assessment','contract_ratification','bylaw_amendment','budget','other')),
+  jurisdiction TEXT,          -- two-letter state code (e.g. 'FL'); drives jurisdiction-specific legal gates
+  perc_variance_ack INTEGER NOT NULL DEFAULT 0, -- committee's recorded claim of a current Florida PERC variance for electronic ratification (never a system approval)
+  perc_variance_ref TEXT,     -- optional date/reference for that claimed variance, kept for the record
   iaff_legal_approval TEXT,   -- for secret-ballot kinds: recorded acknowledgment/reference of IAFF Legal Dept approval (per IAFF Best Practices & Model Rules)
   is_test INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','credentials_issued','open','closed','tallied')),
@@ -181,6 +194,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
   entry_hash TEXT NOT NULL
 );
 `);
+
+/* ---------------- lightweight migrations ----------------
+ * CREATE TABLE IF NOT EXISTS covers fresh databases only. An existing
+ * database (a live deployment upgrading in place) needs the new columns
+ * added; ALTER TABLE ... ADD COLUMN is idempotent via the presence check. */
+function ensureColumn(table, column, ddl) {
+  const has = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+ensureColumn('members', 'email_verified', 'email_verified INTEGER NOT NULL DEFAULT 0');
+ensureColumn('members', 'email_verified_at', 'email_verified_at TEXT');
+ensureColumn('members', 'email_verify_token_hash', 'email_verify_token_hash TEXT');
+ensureColumn('members', 'email_verify_sent_at', 'email_verify_sent_at TEXT');
+ensureColumn('elections', 'jurisdiction', 'jurisdiction TEXT');
+ensureColumn('elections', 'perc_variance_ack', 'perc_variance_ack INTEGER NOT NULL DEFAULT 0');
+ensureColumn('elections', 'perc_variance_ref', 'perc_variance_ref TEXT');
 
 /* ---------------- audit log ---------------- */
 

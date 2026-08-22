@@ -4,6 +4,14 @@
 <h1>Member roster</h1>
 <p class="sub">Only members in good standing receive credentials. Members without email (or flagged for paper) must be offered the alternative paper-ballot method — that's a legal requirement, not an option.</p>
 
+<div class="notice">
+  <strong>Email verification.</strong> A member on the electronic path must confirm their email address
+  (by clicking a one-time link) before any voting credential can be sent to it — this proves the address
+  is real, reachable, and theirs. Paper-ballot members never need to verify anything.
+  <% if (!smtp) { %> SMTP is not configured, so links are not emailed automatically: use
+  <em>Send link</em> on a row to get a one-time verification link for manual delivery.<% } %>
+</div>
+
 <h2>Import members</h2>
 <form method="post" action="/admin/members/import">
   <label for="roster">One member per line: <span class="mono">Name, email, member number</span> (email and number optional)</label>
@@ -13,18 +21,32 @@
 
 <h2>Roster (<%= members.length %>)</h2>
 <table>
-<tr><th>Name</th><th>Email</th><th>No.</th><th>Good standing</th><th>Paper ballot</th><th></th></tr>
+<tr><th>Name</th><th>Email</th><th>Email verification</th><th>No.</th><th>Good standing</th><th>Paper ballot</th><th></th></tr>
 <% members.forEach(function (m) { %>
 <tr>
-  <form method="post" action="/admin/members/<%= m.id %>/update">
   <td><%= m.name %></td>
-  <td><input type="email" name="email" value="<%= m.email || '' %>" style="min-width:200px"></td>
+  <td><input form="upd<%= m.id %>" type="email" name="email" value="<%= m.email || '' %>" style="min-width:200px"></td>
+  <td>
+    <% if (!m.email) { %>
+      <span class="sub">— (paper path)</span>
+    <% } else if (m.email_verified) { %>
+      <span class="tag open">Verified</span>
+    <% } else { %>
+      <span class="tag test">Pending</span>
+      <button form="rvf<%= m.id %>" class="btn small" type="submit"><%= smtp ? (m.email_verify_sent_at ? 'Resend' : 'Send') : 'Send link' %></button>
+    <% } %>
+  </td>
   <td><%= m.member_number || '' %></td>
-  <td><select name="good_standing"><option value="1" <%= m.good_standing ? 'selected':'' %>>Yes</option><option value="0" <%= !m.good_standing ? 'selected':'' %>>No</option></select></td>
-  <td><select name="needs_paper_ballot"><option value="0" <%= !m.needs_paper_ballot ? 'selected':'' %>>No</option><option value="1" <%= m.needs_paper_ballot ? 'selected':'' %>>Yes</option></select></td>
-  <td><button class="btn small" type="submit">Save</button></td>
-  </form>
+  <td><select form="upd<%= m.id %>" name="good_standing"><option value="1" <%= m.good_standing ? 'selected':'' %>>Yes</option><option value="0" <%= !m.good_standing ? 'selected':'' %>>No</option></select></td>
+  <td><select form="upd<%= m.id %>" name="needs_paper_ballot"><option value="0" <%= !m.needs_paper_ballot ? 'selected':'' %>>No</option><option value="1" <%= m.needs_paper_ballot ? 'selected':'' %>>Yes</option></select></td>
+  <td><button form="upd<%= m.id %>" class="btn small" type="submit">Save</button></td>
 </tr>
 <% }) %>
 </table>
+<%# The actual form elements live outside the table (a <form> may not be a
+    direct child of <tr>); each row's controls point at them via form="…". %>
+<% members.forEach(function (m) { %>
+<form id="upd<%= m.id %>" method="post" action="/admin/members/<%= m.id %>/update"></form>
+<form id="rvf<%= m.id %>" method="post" action="/admin/members/<%= m.id %>/send-verification"></form>
+<% }) %>
 <%- include('../partials/foot') %>

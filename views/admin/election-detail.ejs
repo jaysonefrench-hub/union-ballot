@@ -6,6 +6,8 @@
   <span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span>
   <% if (e.is_test) { %><span class="tag test">Test</span><% } %>
   · Ballot key: <%= e.key_threshold %>-of-<%= e.key_shares_total %> shares
+  <% if (e.jurisdiction) { %> · Jurisdiction: <%= e.jurisdiction %><% } %>
+  <% if (e.perc_variance_ack) { %> · PERC variance claimed by committee<%= e.perc_variance_ref ? ' (' + e.perc_variance_ref + ')' : '' %> — not verified by this system<% } %>
   <% if (e.iaff_legal_approval) { %> · IAFF Legal approval: <%= e.iaff_legal_approval %><% } %>
   <% if (e.notice_sent_on) { %> · Notice sent <%= e.notice_sent_on %><% } %>
   <% if (e.opens_at) { %> · Opens <%= e.opens_at %><% } %>
@@ -24,6 +26,15 @@
   <p>Eligibility is frozen from the roster at this moment. Random credentials are generated, stored only as hashes, and
   <% if (smtp) { %>emailed to each eligible member.<% } else { %>shown to you once for delivery (SMTP not configured).<% } %>
   Invite candidate observers to watch this step.</p>
+  <% if (unverifiedMembers.length) { %>
+  <div class="notice warn">
+    <strong>Issuance is blocked: <%= unverifiedMembers.length %> member(s) on the electronic path have not
+    confirmed their email address.</strong> Electronic credentials are only sent to verified addresses.
+    On the <a href="/admin/members">roster page</a>, resend their verification links — or flag them for a
+    paper ballot, which requires no email verification.
+    <ul style="margin:8px 0 0"><% unverifiedMembers.forEach(function (m) { %><li><%= m.name %> — <span class="mono"><%= m.email %></span></li><% }) %></ul>
+  </div>
+  <% } %>
   <form method="post" action="/admin/elections/<%= e.id %>/issue-credentials">
     <% if (smtp) { %>
       <label><input type="radio" name="delivery" value="email" checked style="width:auto"> Email each member their credential</label>

@@ -17,8 +17,61 @@ const { db, audit, verifyAuditChain, getReissueKey, purgeReissueMap } = require(
 const {
   generateElectionKeys, combineShares, decryptBallot,
   generateCredential, hashCredential, aesEncrypt, aesDecrypt, randomHex, secureShuffle,
+  generateVerifyToken, hashVerifyToken,
 } = require('../crypto');
-const { smtpConfigured, sendCredentialEmail } = require('../mailer');
+const { smtpConfigured, sendCredentialEmail, sendVerificationEmail } = require('../mailer');
+
+const BASE_URL = () => process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+
+/* US state/territory codes for the election jurisdiction field. */
+const US_JURISDICTIONS = [
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
+  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['DC', 'District of Columbia'],
+  ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'],
+  ['IN', 'Indiana'], ['IA', 'Iowa'], ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'],
+  ['ME', 'Maine'], ['MD', 'Maryland'], ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'],
+  ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'],
+  ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'], ['NY', 'New York'],
+  ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'], ['OK', 'Oklahoma'], ['OR', 'Oregon'],
+  ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'], ['SD', 'South Dakota'],
+  ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'],
+  ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ['XX', 'Other / outside the United States'],
+];
+const JURISDICTION_CODES = new Set(US_JURISDICTIONS.map(([code]) => code));
+
+/**
+ * Florida PERC hard stop: a BINDING electronic contract-ratification vote in
+ * Florida is blocked unless the committee explicitly records that it holds a
+ * current PERC variance for electronic ratification. FAC 60CC-4.002 requires
+ * ratification by secret ballot at a meeting or by mail with a public count;
+ * PERC has denied electronic-voting requests (e.g. the May 2022 denials), and
+ * no general PERC approval of electronic ratification exists. Officer
+ * elections, bylaws amendments, and every non-Florida jurisdiction are NOT
+ * affected by this gate.
+ */
+function percRatificationBlocked({ jurisdiction, kind, isTest, varianceAck }) {
+  return jurisdiction === 'FL' && kind === 'contract_ratification' && !isTest && !varianceAck;
+}
+
+const PERC_BLOCK_MESSAGE =
+  'Blocked: a binding electronic contract-ratification vote for a Florida unit cannot be created here. '
+  + 'Florida Administrative Code 60CC-4.002 requires ratification by secret ballot at a meeting or by mail ballot with a publicly announced count, '
+  + 'and PERC has denied requests to conduct ratification electronically (May 2022 denials); there is no general PERC approval of electronic ratification voting. '
+  + 'Use a meeting or mail ballot, mark this vote as a TEST election, or — only if your unit actually holds a current PERC variance permitting electronic ratification — '
+  + 'check the variance acknowledgment on the form. This system does not verify or grant PERC approval.';
+
+/**
+ * Start (or restart) email verification for a member: a fresh single-use
+ * token invalidates any previous one. Only the hash is stored; the plaintext
+ * token exists in the returned URL only, for the email or one-time display.
+ */
+function beginEmailVerification(memberId) {
+  const token = generateVerifyToken();
+  db.prepare("UPDATE members SET email_verify_token_hash=?, email_verify_sent_at=datetime('now') WHERE id=?")
+    .run(hashVerifyToken(token), memberId);
+  return `${BASE_URL()}/verify-email?token=${token}`;
+}
 
 function getElection(id) {
   const e = db.prepare('SELECT * FROM elections WHERE id=?').get(id);
@@ -45,45 +98,134 @@ module.exports = function adminRoutes({ flash }) {
   /* ---------------- members ---------------- */
   router.get('/members', (req, res) => {
     const members = db.prepare('SELECT * FROM members ORDER BY name').all();
-    res.render('admin/members', { title: 'Member roster', members });
+    res.render('admin/members', { title: 'Member roster', members, smtp: smtpConfigured() });
   });
 
-  router.post('/members/import', (req, res) => {
-    const lines = String(req.body.roster || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const ins = db.prepare('INSERT INTO members (name, email, member_number) VALUES (?,?,?)');
-    let added = 0;
-    db.transaction(() => {
-      for (const line of lines) {
-        const [name, email, num] = line.split(',').map((s) => (s || '').trim());
-        if (!name) continue;
-        ins.run(name, email || null, num || null);
-        added++;
+  router.post('/members/import', async (req, res, next) => {
+    try {
+      const lines = String(req.body.roster || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const ins = db.prepare('INSERT INTO members (name, email, member_number) VALUES (?,?,?)');
+      const withEmail = []; // { id, name, email } — need verification before electronic delivery
+      let added = 0;
+      db.transaction(() => {
+        for (const line of lines) {
+          const [name, email, num] = line.split(',').map((s) => (s || '').trim());
+          if (!name) continue;
+          const info = ins.run(name, email || null, num || null);
+          if (email) withEmail.push({ id: info.lastInsertRowid, name, email });
+          added++;
+        }
+      })();
+      audit(req.session.user.username, 'roster.import', `${added} members added to roster (${withEmail.length} with email, pending verification)`);
+
+      /* Members with an email address start UNVERIFIED. If SMTP is configured,
+       * send each a verification link now; otherwise they stay pending and the
+       * committee sends links per member from the roster page. */
+      if (smtpConfigured() && withEmail.length > 0) {
+        let sent = 0; const failures = [];
+        for (const m of withEmail) {
+          const verifyUrl = beginEmailVerification(m.id);
+          try {
+            await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl });
+            sent++;
+          } catch (err) { failures.push(`${m.name} <${m.email}>: ${err.message}`); }
+        }
+        audit(req.session.user.username, 'roster.verification_emails_sent', `${sent} email-verification link(s) sent after import, ${failures.length} failed`);
+        flash(req, failures.length ? 'error' : 'ok',
+          `${added} member(s) added. Verification links emailed to ${sent} member(s)`
+          + (failures.length ? `; ${failures.length} failed — use Resend on those rows.` : '. Electronic credentials can only be issued to verified addresses.'));
+      } else {
+        flash(req, 'ok', `${added} member(s) added.`
+          + (withEmail.length ? ` ${withEmail.length} have an email address and must confirm it before electronic credentials can be issued${smtpConfigured() ? '' : ' (SMTP is not configured — use "Send link" on each row to get a one-time verification link for manual delivery)'}.` : ''));
       }
-    })();
-    audit(req.session.user.username, 'roster.import', `${added} members added to roster`);
-    flash(req, 'ok', `${added} member(s) added.`);
-    res.redirect('/admin/members');
+      res.redirect('/admin/members');
+    } catch (err) { next(err); }
   });
 
-  router.post('/members/:id/update', (req, res) => {
-    const m = db.prepare('SELECT * FROM members WHERE id=?').get(req.params.id);
-    if (!m) return res.redirect('/admin/members');
-    const good = req.body.good_standing === '1' ? 1 : 0;
-    const paper = req.body.needs_paper_ballot === '1' ? 1 : 0;
-    db.prepare('UPDATE members SET good_standing=?, needs_paper_ballot=?, email=? WHERE id=?')
-      .run(good, paper, (req.body.email || '').trim() || null, m.id);
-    audit(req.session.user.username, 'roster.update', `Member #${m.id} (${m.name}): good_standing=${good}, paper=${paper}`);
-    res.redirect('/admin/members');
+  router.post('/members/:id/update', async (req, res, next) => {
+    try {
+      const m = db.prepare('SELECT * FROM members WHERE id=?').get(req.params.id);
+      if (!m) return res.redirect('/admin/members');
+      const good = req.body.good_standing === '1' ? 1 : 0;
+      const paper = req.body.needs_paper_ballot === '1' ? 1 : 0;
+      const newEmail = (req.body.email || '').trim() || null;
+      const emailChanged = (newEmail || '') !== (m.email || '');
+      db.prepare('UPDATE members SET good_standing=?, needs_paper_ballot=?, email=? WHERE id=?')
+        .run(good, paper, newEmail, m.id);
+      /* A changed address is a NEW claim: any previous verification (and any
+       * outstanding token) no longer proves anything about it. */
+      if (emailChanged) {
+        db.prepare('UPDATE members SET email_verified=0, email_verified_at=NULL, email_verify_token_hash=NULL, email_verify_sent_at=NULL WHERE id=?').run(m.id);
+      }
+      audit(req.session.user.username, 'roster.update', `Member #${m.id} (${m.name}): good_standing=${good}, paper=${paper}${emailChanged ? '; email changed — verification reset' : ''}`);
+      if (emailChanged && newEmail && smtpConfigured()) {
+        const verifyUrl = beginEmailVerification(m.id);
+        try {
+          await sendVerificationEmail({ to: newEmail, memberName: m.name, verifyUrl });
+          flash(req, 'ok', `Saved. ${m.name}'s email changed, so a new verification link was emailed to ${newEmail}.`);
+        } catch (err) {
+          flash(req, 'error', `Saved, but the verification email to ${newEmail} failed (${err.message}). Use Resend on the row.`);
+        }
+      } else if (emailChanged && newEmail) {
+        flash(req, 'ok', `Saved. ${m.name}'s email changed and is unverified — send them a new verification link before issuing electronic credentials.`);
+      }
+      res.redirect('/admin/members');
+    } catch (err) { next(err); }
+  });
+
+  /* ---------------- (re)send an email-verification link ---------------- */
+  router.post('/members/:id/send-verification', async (req, res, next) => {
+    try {
+      const m = db.prepare('SELECT * FROM members WHERE id=?').get(req.params.id);
+      if (!m) return res.redirect('/admin/members');
+      if (!m.email) { flash(req, 'error', `${m.name} has no email address on the roster; they use the paper-ballot method.`); return res.redirect('/admin/members'); }
+      if (m.email_verified) { flash(req, 'ok', `${m.name}'s email address is already verified.`); return res.redirect('/admin/members'); }
+
+      const verifyUrl = beginEmailVerification(m.id);
+      if (smtpConfigured()) {
+        await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl });
+        audit(req.session.user.username, 'roster.verification_email_sent', `Verification link (re)sent to member #${m.id} (${m.name}); any previous link is now invalid`);
+        flash(req, 'ok', `Verification link emailed to ${m.name} <${m.email}>. Any earlier link no longer works.`);
+        res.redirect('/admin/members');
+      } else {
+        /* No SMTP: show the link exactly once for manual delivery (same
+         * pattern as the one-time credential export). */
+        audit(req.session.user.username, 'roster.verification_link_displayed', `One-time verification link displayed for member #${m.id} (${m.name}) for manual delivery; any previous link is now invalid`);
+        res.render('admin/verify-link-once', { title: 'One-time verification link', m, verifyUrl });
+      }
+    } catch (err) { next(err); }
   });
 
   /* ---------------- create election + key ceremony ---------------- */
   router.get('/elections/new', (req, res) => {
-    res.render('admin/election-new', { title: 'New vote' });
+    res.render('admin/election-new', { title: 'New vote', jurisdictions: US_JURISDICTIONS });
   });
 
   router.post('/elections/new', (req, res) => {
     const { title, kind, opens_at, closes_at, notice_sent_on } = req.body;
     const isTest = req.body.is_test === '1' ? 1 : 0;
+
+    /* Jurisdiction is required so jurisdiction-specific legal gates can run. */
+    const jurisdiction = String(req.body.jurisdiction || '').trim().toUpperCase();
+    if (!JURISDICTION_CODES.has(jurisdiction)) {
+      flash(req, 'error', 'Select the jurisdiction this bargaining unit / local operates in. It determines which legal requirements apply to the vote.');
+      return res.redirect('/admin/elections/new');
+    }
+
+    /*
+     * FLORIDA PERC HARD STOP (contract ratification only). See
+     * percRatificationBlocked() for the legal basis. The checkbox records the
+     * committee's own claim of a current PERC variance — this system never
+     * asserts PERC (or OLMS) approval of anything.
+     */
+    const percAck = req.body.perc_variance_ack === '1' ? 1 : 0;
+    const percRef = percAck ? String(req.body.perc_variance_ref || '').trim() : '';
+    if (percRatificationBlocked({ jurisdiction, kind, isTest, varianceAck: percAck })) {
+      audit(req.session.user.username, 'election.create_blocked_perc',
+        `Creation of a binding Florida electronic contract-ratification vote ("${String(title || '').trim()}") was blocked: no PERC variance acknowledgment recorded (FAC 60CC-4.002)`);
+      flash(req, 'error', PERC_BLOCK_MESSAGE);
+      return res.redirect('/admin/elections/new');
+    }
 
     /*
      * IAFF Best Practices & Model Rules: matters requiring a secret ballot
@@ -120,9 +262,9 @@ module.exports = function adminRoutes({ flash }) {
     let electionId;
     db.transaction(() => {
       const info = db.prepare(`INSERT INTO elections
-        (title, kind, iaff_legal_approval, is_test, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(title.trim(), kind, approvalRef || null, isTest, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
+        (title, kind, jurisdiction, perc_variance_ack, perc_variance_ref, iaff_legal_approval, is_test, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(title.trim(), kind, jurisdiction, percAck, percRef || null, approvalRef || null, isTest, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
           keys.publicKey, sharesTotal, threshold, JSON.stringify(keyholders));
       electionId = info.lastInsertRowid;
       for (let i = 0; i < raceTitles.length; i++) {
@@ -135,7 +277,7 @@ module.exports = function adminRoutes({ flash }) {
     })();
 
     audit(req.session.user.username, 'election.created',
-      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${approvalRef ? `; IAFF Legal Dept approval recorded: ${approvalRef}` : ''}`);
+      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${approvalRef ? `; IAFF Legal Dept approval recorded: ${approvalRef}` : ''}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''} — not verified by this system` : ''}`);
 
     /* Shares are displayed exactly once and never stored. */
     res.render('admin/shares-once', {
@@ -156,6 +298,9 @@ module.exports = function adminRoutes({ flash }) {
       return { member_id: s.member_id, name: m ? m.name : `member #${s.member_id}`, method: s.method };
     });
     const paperMembers = db.prepare("SELECT * FROM members WHERE good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='')").all();
+    /* Members headed for the electronic path whose email is still unverified:
+     * issuance is blocked while any of these remain. */
+    const unverifiedMembers = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email!='' AND email_verified=0 ORDER BY name").all();
     /* Reissue-map state: is the encrypted member<->credential map still present,
      * or has it already been purged? Drives the post-close purge control. */
     const rm = db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN member_ref<>'' THEN 1 ELSE 0 END) AS present FROM credentials WHERE election_id=?").get(e.id);
@@ -163,7 +308,7 @@ module.exports = function adminRoutes({ flash }) {
     const reissueMapPurged = rm.total > 0 && (rm.present || 0) === 0;
     res.render('admin/election-detail', {
       title: e.title, e, credStats, ballotCount, turnout, eligibleCount: eligible.length, eligibleMembers,
-      paperMembers, smtp: smtpConfigured(), reissueMapPresent, reissueMapPurged,
+      paperMembers, unverifiedMembers, smtp: smtpConfigured(), reissueMapPresent, reissueMapPurged,
       results: e.results_json ? JSON.parse(e.results_json) : null,
     });
   });
@@ -173,9 +318,33 @@ module.exports = function adminRoutes({ flash }) {
     try {
       const e = getElection(req.params.id);
       if (e.status !== 'draft') { flash(req, 'error', 'Credentials were already issued for this vote.'); return res.redirect(`/admin/elections/${e.id}`); }
+      if (percRatificationBlocked({ jurisdiction: e.jurisdiction, kind: e.kind, isTest: e.is_test, varianceAck: e.perc_variance_ack })) {
+        audit(req.session.user.username, 'election.credential_issue_blocked_perc',
+          `Election #${e.id} "${e.title}": credential issuance blocked — binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
+        flash(req, 'error', PERC_BLOCK_MESSAGE);
+        return res.redirect(`/admin/elections/${e.id}`);
+      }
 
-      const electronic = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email != '' ORDER BY name").all();
+      /*
+       * EMAIL VERIFICATION GATE: electronic credentials go only to VERIFIED
+       * addresses. Members on the paper path (flagged, or no email) are
+       * unaffected — no verification is required to receive a paper ballot.
+       * If anyone is headed for the electronic path with an unverified email,
+       * refuse to issue rather than silently dropping them from both paths.
+       */
+      const electronic = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email != '' AND email_verified=1 ORDER BY name").all();
       const paper = db.prepare("SELECT * FROM members WHERE good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='') ORDER BY name").all();
+      const unverified = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email!='' AND email_verified=0 ORDER BY name").all();
+      if (unverified.length > 0) {
+        audit(req.session.user.username, 'election.credential_issue_blocked_unverified',
+          `Election #${e.id}: credential issuance blocked — ${unverified.length} member(s) on the electronic path have unverified email addresses`);
+        const names = unverified.slice(0, 5).map((m) => m.name).join(', ');
+        flash(req, 'error',
+          `Cannot issue electronic credentials: ${unverified.length} member(s) have not confirmed their email address `
+          + `(${names}${unverified.length > 5 ? ', …' : ''}). `
+          + 'On the roster page, resend their verification links, or flag them for a paper ballot. Verified members and paper-ballot members are unaffected.');
+        return res.redirect(`/admin/elections/${e.id}`);
+      }
       if (electronic.length + paper.length === 0) { flash(req, 'error', 'The roster has no members in good standing. Import the roster first.'); return res.redirect(`/admin/elections/${e.id}`); }
 
       const reissueKey = getReissueKey();
@@ -243,7 +412,9 @@ module.exports = function adminRoutes({ flash }) {
       audit(req.session.user.username, 'election.credential_reissued', `Election #${e.id}: credential voided and reissued for one member (old credential invalidated)`);
 
       const voteUrl = (process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`) + '/';
-      if (smtpConfigured() && member.email) {
+      /* Email delivery only to a still-verified address (it may have been
+       * changed since issuance); otherwise fall back to the one-time display. */
+      if (smtpConfigured() && member.email && member.email_verified) {
         await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at });
         flash(req, 'ok', `A replacement credential was emailed to ${member.name}. The previous credential no longer works.`);
         res.redirect(`/admin/elections/${e.id}`);
@@ -257,6 +428,14 @@ module.exports = function adminRoutes({ flash }) {
   router.post('/elections/:id/open', (req, res) => {
     const e = getElection(req.params.id);
     if (e.status !== 'credentials_issued') { flash(req, 'error', 'Issue credentials before opening the vote.'); return res.redirect(`/admin/elections/${e.id}`); }
+    /* Defense in depth: the Florida PERC ratification gate also holds at open,
+     * covering elections created before this gate existed (or edited rows). */
+    if (percRatificationBlocked({ jurisdiction: e.jurisdiction, kind: e.kind, isTest: e.is_test, varianceAck: e.perc_variance_ack })) {
+      audit(req.session.user.username, 'election.open_blocked_perc',
+        `Election #${e.id} "${e.title}": opening blocked — binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
+      flash(req, 'error', PERC_BLOCK_MESSAGE);
+      return res.redirect(`/admin/elections/${e.id}`);
+    }
     db.prepare("UPDATE elections SET status='open' WHERE id=?").run(e.id);
     audit(req.session.user.username, 'election.opened', `Election #${e.id} "${e.title}" opened for voting`);
     flash(req, 'ok', 'Voting is open.');

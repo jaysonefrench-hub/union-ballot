@@ -1,0 +1,12 @@
+<%- include('partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Email confirmation</p>
+<h1><%= ok ? 'Email address confirmed' : 'Link not accepted' %></h1>
+<div class="notice <%= ok ? 'seal' : 'warn' %>">
+  <%= message %>
+</div>
+<p class="sub">Confirming an email address only proves the address works so a voting credential can be
+delivered to it. It records nothing about any ballot, and members who prefer a paper ballot never need
+to confirm an email address.</p>
+<a class="btn" href="/">Back to start</a>
+<%- include('partials/foot') %>
