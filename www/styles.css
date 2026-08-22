@@ -1,0 +1,252 @@
+/* Union Ballot — marketing landing.
+   Same brand palette as the app (paper, ink, fire-service navy, brass,
+   crimson for the hard stop) but a clean system sans stack: this page is
+   static and self-contained, so it loads no webfonts. */
+
+:root {
+  --paper: #faf8f3;
+  --ink: #16181d;
+  --navy: #1b2a4a;
+  --navy-deep: #142139;
+  --brass: #8a6d2f;
+  --brick: #a6192e;
+  --muted: #5c5850;
+  --line: #e2ddd1;
+  --card: #ffffff;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
+h2 { font-size: 1.75rem; margin: 0 0 0.5rem; }
+h3 { font-size: 1.05rem; margin: 0 0 0.25rem; }
+a { color: var(--navy); }
+
+/* Header */
+.site-header {
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.site-nav { display: flex; align-items: center; gap: 22px; }
+.site-nav a {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+.site-nav a:hover { color: var(--navy); text-decoration: underline; }
+.nav-cta {
+  background: var(--navy);
+  color: #fff !important;
+  padding: 8px 16px;
+  border-radius: 8px;
+}
+.nav-cta:hover { background: var(--navy-deep); text-decoration: none !important; }
+
+/* Hero */
+.hero { padding: 88px 0 72px; text-align: center; }
+.kicker {
+  margin: 0 0 14px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+.hero h1 {
+  margin: 0 0 18px;
+  font-size: clamp(2.1rem, 5.5vw, 3.4rem);
+  font-weight: 800;
+}
+.lede {
+  max-width: 34em;
+  margin: 0 auto 32px;
+  font-size: 1.2rem;
+  color: var(--muted);
+}
+
+.cta-row { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.btn {
+  display: inline-block;
+  padding: 13px 26px;
+  border-radius: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1.5px solid transparent;
+}
+.btn-primary { background: var(--navy); color: #fff; }
+.btn-primary:hover { background: var(--navy-deep); }
+.btn-ghost { border-color: var(--navy); color: var(--navy); background: transparent; }
+.btn-ghost:hover { background: rgba(27, 42, 74, 0.07); }
+.btn-lg { padding: 15px 34px; font-size: 1.05rem; }
+
+/* Sections */
+.section { padding: 64px 0; }
+.section-alt { background: #f2efe7; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.section-lede { margin: 0 0 28px; color: var(--muted); max-width: 40em; }
+
+.card-grid {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 22px;
+}
+.card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+.note {
+  margin: 0;
+  padding: 14px 18px;
+  border-left: 3px solid var(--brass);
+  background: rgba(138, 109, 47, 0.06);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.95rem;
+  max-width: 46em;
+}
+
+.check-list { list-style: none; margin: 0; padding: 0; max-width: 44em; }
+.check-list li {
+  position: relative;
+  padding: 8px 0 8px 34px;
+  font-size: 1.02rem;
+}
+.check-list li::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 15px;
+  width: 14px;
+  height: 8px;
+  border-left: 2.5px solid var(--brass);
+  border-bottom: 2.5px solid var(--brass);
+  transform: rotate(-45deg);
+}
+
+/* PERC hard stop */
+.stop-card {
+  border: 1.5px solid var(--brick);
+  border-left-width: 6px;
+  border-radius: 12px;
+  background: #fff;
+  padding: 22px 26px;
+  margin-bottom: 20px;
+  max-width: 50em;
+}
+.stop-card p { margin: 0 0 12px; }
+.stop-card ul { margin: 0; padding-left: 22px; }
+.stop-card li { margin: 4px 0; }
+.stop-card strong { color: var(--brick); }
+.stop-card p strong { color: var(--ink); }
+
+/* How it works */
+.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 24px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+}
+.steps li {
+  counter-increment: step;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px;
+}
+.steps li::before {
+  content: counter(step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.steps p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+
+/* CTA band */
+.cta-band {
+  background: var(--navy);
+  color: #fff;
+  text-align: center;
+}
+.cta-band h2 { color: #fff; }
+.cta-band p { color: rgba(255, 255, 255, 0.75); margin: 0 0 26px; }
+.cta-band .btn-primary { background: #fff; color: var(--navy); }
+.cta-band .btn-primary:hover { background: var(--paper); }
+
+/* Contact */
+.contact-card {
+  font-style: normal;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px 28px;
+  display: inline-block;
+}
+.contact-card p { margin: 4px 0; }
+.contact-name { font-weight: 700; font-size: 1.1rem; }
+
+/* Footer */
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 28px 0 40px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.site-footer p { margin: 0; }
+
+@media (max-width: 640px) {
+  .site-nav a:not(.nav-cta) { display: none; }
+  .hero { padding: 56px 0 48px; }
+  .section { padding: 48px 0; }
+}
