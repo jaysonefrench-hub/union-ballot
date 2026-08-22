@@ -13,7 +13,7 @@
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { db, audit, verifyAuditChain, getReissueKey, purgeReissueMap } = require('../db');
+const { db, audit, getReissueKey, purgeReissueMap } = require('../db');
 const {
   generateElectionKeys, combineShares, decryptBallot,
   generateCredential, hashCredential, aesEncrypt, aesDecrypt, randomHex, secureShuffle,
@@ -21,6 +21,7 @@ const {
 } = require('../crypto');
 const { smtpConfigured, sendCredentialEmail, sendVerificationEmail } = require('../mailer');
 const { checkEmailSyntax } = require('../email-syntax');
+const { buildArchive, writeSealedArchive } = require('../archives');
 
 const BASE_URL = () => process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
@@ -685,45 +686,81 @@ module.exports = function adminRoutes({ flash }) {
       audit(req.session.user.username, 'tally.completed',
         `Election #${e.id} "${e.title}": ${ballots.length} ballots unsealed with ${e.key_threshold}-of-${e.key_shares_total} key shares and counted. Integrity ${results.integrity_ok ? 'OK' : 'ALERT — see log'}.`);
 
+      /*
+       * RETENTION SAFETY NET: persist the sealed records archive the moment
+       * the tally lands, so the one-year record exists even if the committee
+       * never clicks Export — and can be re-issued to the local later if it
+       * loses its copy. Same contents as the manual export; encrypted at rest
+       * under BACKUP_KEY when configured; never contains a key share or a
+       * plaintext ballot. A failure here is audited but must NEVER undo or
+       * block the tally itself — the results above are already committed.
+       */
+      try {
+        const rec = writeSealedArchive(e.id);
+        audit(req.session.user.username, 'election.archive_stored',
+          `Election #${e.id}: sealed records archive stored automatically as ${rec.filename} (${rec.encrypted ? 'AES-256-GCM under BACKUP_KEY' : 'plaintext JSON — set BACKUP_KEY to encrypt archives at rest'}; ${rec.ballot_count} encrypted ballots; sha256 ${rec.sha256})`);
+      } catch (archiveErr) {
+        console.error('[archive] automatic records archive failed:', archiveErr.message);
+        audit(req.session.user.username, 'election.archive_store_failed',
+          `Election #${e.id}: automatic records archive could NOT be stored (${String(archiveErr.message || 'unknown error').slice(0, 180)}). Export the archive manually from the election page and keep a copy off-site.`);
+      }
+
       flash(req, 'ok', 'Tally complete. Publish the results to the membership and preserve all records for one year.');
       res.redirect(`/admin/elections/${e.id}`);
     } catch (err) { next(err); }
   });
 
-  /* ---------------- records archive (1-year retention) ---------------- */
+  /* ---------------- records archive (1-year retention) ----------------
+   * Manual export, unchanged in content: buildArchive() is shared with the
+   * automatic tally-time sealed archive so the two can never diverge. */
   router.get('/elections/:id/archive', (req, res) => {
-    const e = getElection(req.params.id);
-    const archive = {
-      generated_at: new Date().toISOString(),
-      note: 'LMRDA Section 401(e): preserve this archive and all related records for one year after the election.',
-      election: e,
-      eligibility_snapshot: JSON.parse(e.eligibility_snapshot || '[]'),
-      turnout: db.prepare('SELECT m.name, m.member_number, t.voted_on, t.method FROM turnout t JOIN members m ON m.id=t.member_id WHERE t.election_id=? ORDER BY m.name').all(e.id),
-      credentials_hashed: db.prepare('SELECT id, code_hash, salt, voided, redeemed, redeemed_on FROM credentials WHERE election_id=?').all(e.id),
-      encrypted_ballots: db.prepare('SELECT id, payload FROM ballots WHERE election_id=? ORDER BY id').all(e.id),
-      results: e.results_json ? JSON.parse(e.results_json) : null,
-      audit_log: db.prepare('SELECT * FROM audit_log ORDER BY id').all(),
-      audit_chain_verification: verifyAuditChain(),
-    };
-    audit(req.session.user.username, 'election.archive_exported', `Election #${e.id}: records archive exported for retention`);
-    res.setHeader('Content-Disposition', `attachment; filename="election-${e.id}-records.json"`);
+    const archive = buildArchive(req.params.id);
+    audit(req.session.user.username, 'election.archive_exported', `Election #${archive.election.id}: records archive exported for retention`);
+    res.setHeader('Content-Disposition', `attachment; filename="election-${archive.election.id}-records.json"`);
     res.json(archive);
   });
 
-  /* ---------------- observer accounts ---------------- */
+  /* ---------------- committee & observer accounts ---------------- */
   router.get('/users', (req, res) => {
-    const users = db.prepare('SELECT id, username, role, display_name, created_at FROM users ORDER BY role, username').all();
-    res.render('admin/users', { title: 'Accounts', users });
+    const users = db.prepare('SELECT id, username, role, display_name, email, created_at FROM users ORDER BY role, username').all();
+    res.render('admin/users', { title: 'Accounts', users, smtp: smtpConfigured() });
   });
 
   router.post('/users', (req, res) => {
     const { username, password, display_name, role } = req.body;
     if (!username || !password || password.length < 10) { flash(req, 'error', 'Observer accounts need a username and a password of at least 10 characters.'); return res.redirect('/admin/users'); }
+    /* Recovery email is optional but, when given, must be deliverable as
+     * written — same syntax gate as the member roster. */
+    const email = (req.body.email || '').trim() || null;
+    if (email) {
+      const check = checkEmailSyntax(email);
+      if (!check.ok) { flash(req, 'error', `Account not created. "${email}" does not look like a deliverable email address — ${check.reason}.`); return res.redirect('/admin/users'); }
+    }
     const r = role === 'admin' ? 'admin' : 'observer';
-    db.prepare('INSERT INTO users (username, password_hash, role, display_name) VALUES (?,?,?,?)')
-      .run(username.trim(), bcrypt.hashSync(password, 12), r, (display_name || username).trim());
-    audit(req.session.user.username, 'users.created', `${r} account "${username.trim()}" created (${(display_name || username).trim()})`);
+    db.prepare('INSERT INTO users (username, password_hash, role, display_name, email) VALUES (?,?,?,?,?)')
+      .run(username.trim(), bcrypt.hashSync(password, 12), r, (display_name || username).trim(), email);
+    audit(req.session.user.username, 'users.created', `${r} account "${username.trim()}" created (${(display_name || username).trim()})${email ? ' with a recovery email on file' : ''}`);
     flash(req, 'ok', `${r === 'admin' ? 'Administrator' : 'Observer'} account created.`);
+    res.redirect('/admin/users');
+  });
+
+  /* Set or clear an account's recovery email. Without one, the account
+   * cannot use the emailed forgot-password flow — recovery then requires the
+   * platform owner to generate a one-time reset link. */
+  router.post('/users/:id/email', (req, res) => {
+    const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+    if (!u) return res.redirect('/admin/users');
+    const email = (req.body.email || '').trim() || null;
+    if (email) {
+      const check = checkEmailSyntax(email);
+      if (!check.ok) { flash(req, 'error', `Not saved. "${email}" does not look like a deliverable email address — ${check.reason}.`); return res.redirect('/admin/users'); }
+    }
+    db.prepare('UPDATE users SET email=? WHERE id=?').run(email, u.id);
+    audit(req.session.user.username, 'users.email_set',
+      email ? `Recovery email set for account "${u.username}"` : `Recovery email removed from account "${u.username}"`);
+    flash(req, 'ok', email
+      ? `Recovery email saved for ${u.username}. Password-reset links can now be emailed to it.`
+      : `Recovery email removed from ${u.username}. That account can no longer use the emailed reset flow.`);
     res.redirect('/admin/users');
   });
 

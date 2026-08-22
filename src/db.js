@@ -65,12 +65,22 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+/*
+ * Committee/observer accounts. email is the account-recovery address (never a
+ * voter's): password-reset links can only be emailed to it. reset_token_hash
+ * follows the same discipline as member email-verification tokens — the
+ * plaintext token exists only in the reset link, only the SHA-256 hash is
+ * stored, it is single-use, and it expires.
+ */
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin','observer')),
   display_name TEXT NOT NULL,
+  email TEXT,
+  reset_token_hash TEXT,
+  reset_token_sent_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -193,6 +203,32 @@ CREATE TABLE IF NOT EXISTS audit_log (
   prev_hash TEXT NOT NULL,
   entry_hash TEXT NOT NULL
 );
+
+/*
+ * Sealed records archives, written automatically when an election is tallied
+ * (same contents as the manual /admin/elections/:id/archive export). The row
+ * holds METADATA ONLY — counts and a file pointer, never member data — so the
+ * platform-support page can list archives without opening them. election_id
+ * is deliberately NOT a foreign key: an archive is a retention record and
+ * must outlive whatever happens to the live election row.
+ *
+ * MULTI-LOCAL NOTE: today one deployment serves one local. If several locals
+ * ever report into shared infrastructure, this table (and the platform stats
+ * page) is the shape that reporting rolls up into — a future local_id column
+ * here and per-local aggregation there, with the same counts-only rule.
+ */
+CREATE TABLE IF NOT EXISTS archives (
+  id INTEGER PRIMARY KEY,
+  election_id INTEGER NOT NULL,
+  election_title TEXT NOT NULL,
+  tallied_at TEXT,
+  ballot_count INTEGER NOT NULL DEFAULT 0,
+  filename TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  sha256 TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 /* ---------------- lightweight migrations ----------------
@@ -210,6 +246,9 @@ ensureColumn('members', 'email_verify_sent_at', 'email_verify_sent_at TEXT');
 ensureColumn('elections', 'jurisdiction', 'jurisdiction TEXT');
 ensureColumn('elections', 'perc_variance_ack', 'perc_variance_ack INTEGER NOT NULL DEFAULT 0');
 ensureColumn('elections', 'perc_variance_ref', 'perc_variance_ref TEXT');
+ensureColumn('users', 'email', 'email TEXT');
+ensureColumn('users', 'reset_token_hash', 'reset_token_hash TEXT');
+ensureColumn('users', 'reset_token_sent_at', 'reset_token_sent_at TEXT');
 
 /* ---------------- audit log ---------------- */
 
@@ -318,4 +357,4 @@ function purgeReissueMap(electionId) {
   return info.changes;
 }
 
-module.exports = { db, audit, verifyAuditChain, getReissueKey, purgeReissueMap };
+module.exports = { db, audit, verifyAuditChain, getReissueKey, purgeReissueMap, DATA_DIR };

@@ -184,6 +184,10 @@ app.post('/logout', (req, res) => {
 
 /* ----- routes ----- */
 app.use('/', require('./src/routes/voter')({ flash }));
+/* Password recovery (/forgot-password, /reset-password): public by nature —
+ * the whole point is that the person is locked out — protected by hash-only
+ * single-use tokens, not sessions. */
+app.use('/', require('./src/routes/recovery')({ flash }));
 app.use('/admin', requireRole('admin'), require('./src/routes/backup')({ flash }));
 app.use('/admin', requireRole('admin'), require('./src/routes/admin')({ flash }));
 app.use('/observe', requireRole('observer', 'admin'), require('./src/routes/observer')({ flash }));

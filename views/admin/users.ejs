@@ -8,15 +8,33 @@
   <label>Display name</label><input type="text" name="display_name" required placeholder="Observer for Candidate Smith">
   <label>Username</label><input type="text" name="username" required>
   <label>Password (10+ characters)</label><input type="text" name="password" minlength="10" required>
+  <label>Recovery email (optional — enables the forgot-password flow)</label>
+  <input type="email" name="email" autocomplete="off" placeholder="chair@example.org">
   <label>Role</label>
   <select name="role"><option value="observer">Observer (read-only)</option><option value="admin">Administrator</option></select>
   <button class="btn" type="submit">Create</button>
 </form>
 <h2>Existing accounts</h2>
+<p class="sub">An account with a <strong>recovery email</strong> can reset a forgotten password
+itself via the emailed link on the sign-in page<% if (!smtp) { %> (once SMTP is configured)<% } %>.
+Accounts without one depend on platform support for a one-time reset link — add an email for every
+administrator. Passwords are never emailed or displayed; a reset link only lets its holder choose
+a new one.</p>
 <table>
-<tr><th>Name</th><th>Username</th><th>Role</th><th>Created</th></tr>
+<tr><th>Name</th><th>Username</th><th>Role</th><th>Recovery email</th><th>Created</th></tr>
 <% users.forEach(function (u) { %>
-<tr><td><%= u.display_name %></td><td><%= u.username %></td><td><%= u.role %></td><td><%= u.created_at %></td></tr>
+<tr>
+  <td><%= u.display_name %></td>
+  <td><%= u.username %></td>
+  <td><%= u.role %></td>
+  <td>
+    <form method="post" action="/admin/users/<%= u.id %>/email" style="display:flex;gap:8px;align-items:center;margin:0">
+      <input type="email" name="email" value="<%= u.email || '' %>" placeholder="none — cannot use email reset" style="min-width:220px">
+      <button class="btn small" type="submit">Save</button>
+    </form>
+  </td>
+  <td><%= u.created_at %></td>
+</tr>
 <% }) %>
 </table>
 <%- include('../partials/foot') %>

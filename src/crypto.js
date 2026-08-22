@@ -203,15 +203,16 @@ function hashCredential(credential, salt) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Email-verification tokens                                           */
+/* Single-use magic-link tokens (email verification, password reset)   */
 /* ------------------------------------------------------------------ */
 /*
- * Single-use tokens proving a roster email address is real and reachable
- * before any electronic voting credential is sent to it. 128 bits from the
- * CSPRNG; stored only as an UNSALTED SHA-256 hash so the member row can be
- * found by direct lookup. Unsalted is appropriate for the same reason as
- * credentials: the input is uniformly random, so the space cannot be brute
- * forced regardless of hash speed, and no two members ever share a token.
+ * Single-use tokens for magic links: proving a roster email address is real
+ * before any electronic voting credential is sent to it, and letting a
+ * committee account holder set a new password (src/reset-tokens.js). 128
+ * bits from the CSPRNG; stored only as an UNSALTED SHA-256 hash so the row
+ * can be found by direct lookup. Unsalted is appropriate for the same reason
+ * as credentials: the input is uniformly random, so the space cannot be
+ * brute forced regardless of hash speed, and no two tokens ever collide.
  */
 
 function generateVerifyToken() {
