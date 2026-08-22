@@ -7,6 +7,10 @@
 'use strict';
 process.env.DATA_DIR = require('path').join(__dirname, '..', 'data-test');
 process.env.PORT = '3999';
+/* The test creates a binding (non-test) election, and getReissueKey() refuses
+ * to auto-generate a key once one exists — so supply a throwaway key, exactly
+ * as a real deployment would via the environment. */
+process.env.REISSUE_KEY = process.env.REISSUE_KEY || require('crypto').randomBytes(32).toString('hex');
 const fs = require('fs');
 fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
 
@@ -48,17 +52,29 @@ async function req(method, path, body, useCookie = true) {
     await req('POST', '/admin/members/import', { roster });
     assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM members').get().n, 7, 'roster imported');
 
+    /* 2b. Email verification: everyone with an email starts UNVERIFIED */
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM members WHERE email IS NOT NULL AND email_verified=1").get().n, 0,
+      'imported members start with unverified emails');
+
     /* 3. IAFF approval gate: officer election WITHOUT approval must be rejected */
     let r = await req('POST', '/admin/elections/new', {
-      title: 'Should Fail', kind: 'officer_election',
+      title: 'Should Fail', kind: 'officer_election', jurisdiction: 'OH',
       race_title: 'President', race_seats: '1', race_threshold: 'majority', race_candidates: 'X\nY',
       key_shares_total: '5', key_threshold: '3', keyholders: '',
     });
     assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM elections').get().n, 0, 'approval gate blocks unapproved officer election');
 
+    /* 3b. Jurisdiction is required */
+    r = await req('POST', '/admin/elections/new', {
+      title: 'No Jurisdiction', kind: 'other',
+      race_title: 'Q', race_seats: '1', race_threshold: 'majority', race_candidates: 'Yes\nNo',
+      key_shares_total: '5', key_threshold: '3', keyholders: '',
+    });
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM elections').get().n, 0, 'missing jurisdiction blocks creation');
+
     /* 4. Create officer election WITH recorded approval; capture key shares */
     r = await req('POST', '/admin/elections/new', {
-      title: '2026 Officer Election', kind: 'officer_election',
+      title: '2026 Officer Election', kind: 'officer_election', jurisdiction: 'OH',
       iaff_legal_approval: 'IAFF Legal Dept letter 2026-06-01 ref L-1234',
       notice_sent_on: '2026-06-20',
       race_title: ['President', 'Shall dues increase $5/mo?'],
@@ -71,6 +87,43 @@ async function req(method, path, body, useCookie = true) {
     const shares = [...r.text.matchAll(/SHARE-\d+-[0-9a-f]+/g)].map((m) => m[0]);
     assert.strictEqual(shares.length, 5, 'five key shares displayed once');
     const eid = db.prepare('SELECT id FROM elections ORDER BY id DESC LIMIT 1').get().id;
+
+    /* 4b. Credential issuance must be BLOCKED while electronic-path emails are unverified */
+    r = await req('POST', `/admin/elections/${eid}/issue-credentials`, {});
+    assert.strictEqual(db.prepare("SELECT status FROM elections WHERE id=?").get(eid).status, 'draft',
+      'issuance blocked: election still draft while emails unverified');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM credentials WHERE election_id=?').get(eid).n, 0,
+      'issuance blocked: no credentials created for unverified members');
+
+    /* 4c. Verify each electronic member via their one-time link (no SMTP →
+     * the resend route displays the link once; capture and follow it). */
+    const emembers = db.prepare("SELECT * FROM members WHERE email IS NOT NULL ORDER BY id").all();
+    assert.strictEqual(emembers.length, 6);
+    let firstToken = null;
+    for (const m of emembers) {
+      const page = await req('POST', `/admin/members/${m.id}/send-verification`, {});
+      const match = page.text.match(/\/verify-email\?token=([0-9a-f]{32})/);
+      assert.ok(match, `one-time verification link displayed for ${m.name}`);
+      if (!firstToken) firstToken = match[1];
+      /* token stored only as a hash, never in plaintext */
+      assert.ok(!db.serialize().toString('latin1').includes(match[1]), 'verification token plaintext never stored');
+      const v = await req('GET', `/verify-email?token=${match[1]}`, null, false);
+      assert.ok(v.text.includes('confirmed'), `${m.name} email verified via link`);
+    }
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM members WHERE email_verified=1').get().n, 6, 'all six emails verified');
+    /* tokens are single-use and bad tokens are rejected */
+    let v = await req('GET', `/verify-email?token=${firstToken}`, null, false);
+    assert.strictEqual(v.status, 400, 'used verification token rejected');
+    v = await req('GET', '/verify-email?token=deadbeefdeadbeefdeadbeefdeadbeef', null, false);
+    assert.strictEqual(v.status, 400, 'unknown verification token rejected');
+    /* changing a member's email resets verification */
+    const alice = emembers[0];
+    await req('POST', `/admin/members/${alice.id}/update`, { email: 'new-a@x.test', good_standing: '1', needs_paper_ballot: '0' });
+    assert.strictEqual(db.prepare('SELECT email_verified FROM members WHERE id=?').get(alice.id).email_verified, 0, 'email change resets verification');
+    /* restore and re-verify so issuance can proceed */
+    await req('POST', `/admin/members/${alice.id}/update`, { email: 'a@x.test', good_standing: '1', needs_paper_ballot: '0' });
+    const relink = await req('POST', `/admin/members/${alice.id}/send-verification`, {});
+    await req('GET', relink.text.match(/\/verify-email\?token=[0-9a-f]{32}/)[0], null, false);
 
     /* 5. Issue credentials (no SMTP → one-time export) and capture them */
     r = await req('POST', `/admin/elections/${eid}/issue-credentials`, {});
@@ -150,10 +203,47 @@ async function req(method, path, body, useCookie = true) {
     assert.strictEqual(archive.encrypted_ballots.length, 6, 'archive preserves encrypted ballots');
     assert.ok(archive.audit_chain_verification.ok);
 
+    /* 13. FLORIDA PERC HARD STOP — contract ratification only */
+    const baseVote = {
+      race_title: 'Shall the tentative agreement be ratified?', race_seats: '1',
+      race_threshold: 'majority', race_candidates: 'Yes — ratify\nNo — reject',
+      key_shares_total: '5', key_threshold: '3', keyholders: '',
+    };
+    const electionCount = () => db.prepare('SELECT COUNT(*) n FROM elections').get().n;
+    let n0 = electionCount();
+
+    /* 13a. Binding FL ratification WITHOUT a variance ack → blocked */
+    await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL TA Ratification (no variance)', kind: 'contract_ratification', jurisdiction: 'FL' });
+    assert.strictEqual(electionCount(), n0, 'binding FL electronic ratification blocked without PERC variance ack');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='election.create_blocked_perc'").get().n >= 1, 'PERC block is audited');
+
+    /* 13b. Binding FL ratification WITH the recorded variance ack → allowed, flag stored */
+    await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL TA Ratification (variance claimed)', kind: 'contract_ratification', jurisdiction: 'FL', perc_variance_ack: '1', perc_variance_ref: 'PERC variance order 2026-03-15' });
+    assert.strictEqual(electionCount(), n0 + 1, 'FL ratification allowed when committee records a PERC variance');
+    const flVar = db.prepare('SELECT * FROM elections ORDER BY id DESC LIMIT 1').get();
+    assert.strictEqual(flVar.perc_variance_ack, 1, 'variance acknowledgment stored on the election');
+    assert.strictEqual(flVar.perc_variance_ref, 'PERC variance order 2026-03-15', 'variance reference stored');
+
+    /* 13c. FL TEST-election ratification → allowed without a variance */
+    await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL TA Ratification (test run)', kind: 'contract_ratification', jurisdiction: 'FL', is_test: '1' });
+    assert.strictEqual(electionCount(), n0 + 2, 'FL ratification test election allowed without variance');
+
+    /* 13d. FL NON-ratification votes are NOT blocked (bylaws, officer election) */
+    await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL Bylaw Amendment', kind: 'bylaw_amendment', jurisdiction: 'FL' });
+    assert.strictEqual(electionCount(), n0 + 3, 'FL bylaw amendment not blocked');
+    await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL Officer Election', kind: 'officer_election', jurisdiction: 'FL', iaff_legal_approval: 'IAFF Legal Dept letter 2026-06-01' });
+    assert.strictEqual(electionCount(), n0 + 4, 'FL officer election not blocked by PERC gate');
+
+    /* 13e. Non-FL ratification → not blocked */
+    await req('POST', '/admin/elections/new', { ...baseVote, title: 'OH TA Ratification', kind: 'contract_ratification', jurisdiction: 'OH' });
+    assert.strictEqual(electionCount(), n0 + 5, 'non-Florida ratification not blocked');
+
     console.log('\nALL SMOKE TESTS PASSED ✔');
     console.log(`  Election #${eid}: 6 ballots, Smith elected (majority), dues adopted (2/3).`);
     console.log('  Verified: approval gate, one-time shares, hashed credentials, unlinkable ballots,');
     console.log('  date-only redemption, double-vote rejection, 3-of-5 threshold tally, audit chain, archive.');
+    console.log('  Verified: email-verification gate (block/verify/single-use token/reset-on-change),');
+    console.log('  Florida PERC ratification hard stop (block, variance path, test/non-ratification/non-FL unaffected).');
   } finally {
     server.close();
     fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
