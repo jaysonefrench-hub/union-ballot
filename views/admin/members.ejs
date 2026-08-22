@@ -13,6 +13,10 @@
 </div>
 
 <h2>Import members</h2>
+<p class="sub">Email addresses are checked for valid format at import. Rows with an address that cannot receive
+mail as written (missing @, missing .com/.org ending, spaces, …) are <strong>not</strong> imported — they come back
+on an import report with the reason per row, so you can fix and re-import exactly those rows. A blank email is
+fine: that member uses the paper-ballot method.</p>
 <form method="post" action="/admin/members/import">
   <label for="roster">One member per line: <span class="mono">Name, email, member number</span> (email and number optional)</label>
   <textarea id="roster" name="roster" rows="6" placeholder="Jane Smith, jsmith@example.com, 1042&#10;Bob Jones, , 1043"></textarea>

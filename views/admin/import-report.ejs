@@ -1,0 +1,52 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Roster import</p>
+<h1>Import report</h1>
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= added %></div><div class="l">Added</div></div>
+  <div class="stat"><div class="n"><%= rejected.length %></div><div class="l">Not imported</div></div>
+  <% if (smtp && withEmailCount > 0) { %><div class="stat"><div class="n"><%= sent %></div><div class="l">Verification links emailed</div></div><% } %>
+</div>
+
+<div class="notice warn">
+  <strong><%= rejected.length %> row(s) were NOT imported.</strong>
+  Each has an email address that cannot receive mail as written (or is missing the member name), so importing
+  it would leave that member stuck as “Pending” with a verification link that can never arrive. Fix the rows
+  below and re-import <em>just those rows</em> — the <%= added %> valid row(s) are already on the roster and
+  must not be pasted again. A blank email is always fine: that member votes by the paper-ballot method.
+</div>
+
+<table>
+<tr><th>Line</th><th>Name</th><th>Email</th><th>Problem</th></tr>
+<% rejected.forEach(function (r) { %>
+<tr>
+  <td><%= r.line %></td>
+  <td><%= r.name || '—' %></td>
+  <td class="mono"><%= r.email || '—' %></td>
+  <td><%= r.reason %></td>
+</tr>
+<% }) %>
+</table>
+
+<% if (failures && failures.length) { %>
+<div class="notice warn"><strong>Verification-email delivery failures — use Resend on those roster rows:</strong>
+<ul><% failures.forEach(function (f) { %><li><%= f %></li><% }) %></ul></div>
+<% } %>
+
+<% if (withEmailCount > 0 && !smtp) { %>
+<div class="notice">
+  <%= withEmailCount %> added member(s) have an email address and must confirm it before electronic credentials
+  can be issued. SMTP is not configured — use <em>Send link</em> on each roster row to get a one-time
+  verification link for manual delivery.
+</div>
+<% } %>
+
+<h2>Fix and re-import</h2>
+<p class="sub">The rejected rows are pre-filled below, exactly as uploaded. Correct them and re-import.</p>
+<form method="post" action="/admin/members/import">
+  <label for="roster">One member per line: <span class="mono">Name, email, member number</span> (email and number optional)</label>
+  <textarea id="roster" name="roster" rows="<%= Math.min(12, rejected.length + 2) %>"><%= rejected.map(function (r) { return r.raw; }).join('\n') %></textarea>
+  <button class="btn primary" type="submit">Re-import corrected rows</button>
+  <a class="btn" href="/admin/members">Back to roster</a>
+</form>
+<%- include('../partials/foot') %>
