@@ -3,16 +3,25 @@
  * Verifies: setup → roster → create (with IAFF approval gate) → key ceremony →
  * credentials → open → 6 ballots cast → close → tally with 3-of-5 shares →
  * majority/runoff math → anonymity properties of stored data → roster-import
- * email-syntax gate (report of rejected rows) → member-edit email gate.
+ * email-syntax gate (report of rejected rows) → member-edit email gate →
+ * automatic sealed archive at tally → platform-owner page (key gate, counts
+ * only, archive download) → committee password reset (hash-only tokens).
  */
 'use strict';
+const crypto = require('crypto');
 process.env.DATA_DIR = require('path').join(__dirname, '..', 'data-test');
 process.env.PORT = '3999';
 /* The test creates a binding (non-test) election, and getReissueKey() refuses
  * to auto-generate a key once one exists — so supply a throwaway key, exactly
  * as a real deployment would via the environment. */
-process.env.REISSUE_KEY = process.env.REISSUE_KEY || require('crypto').randomBytes(32).toString('hex');
+process.env.REISSUE_KEY = process.env.REISSUE_KEY || crypto.randomBytes(32).toString('hex');
+/* Exercise the platform-owner page and encrypted-at-rest archives. */
+const PLATFORM_KEY = 'platform-owner-test-key-0123456789';
+process.env.PLATFORM_OWNER_KEY = PLATFORM_KEY;
+const BACKUP_KEY_HEX = crypto.randomBytes(32).toString('hex');
+process.env.BACKUP_KEY = BACKUP_KEY_HEX;
 const fs = require('fs');
+const path = require('path');
 fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
 
 const app = require('../server');
@@ -38,6 +47,30 @@ async function req(method, path, body, useCookie = true) {
   const setc = r.headers.get('set-cookie');
   if (setc && useCookie) cookie = setc.split(';')[0]; // never let anonymous voter sessions clobber the admin session
   return { status: r.status, text: await r.text(), location: r.headers.get('location') };
+}
+
+/* Cookie-less request with custom headers (for X-Platform-Key testing). */
+async function reqHeaders(method, path, headers) {
+  const r = await fetch(BASE + path, { method, headers, redirect: 'manual' });
+  return { status: r.status, text: await r.text(), location: r.headers.get('location') };
+}
+
+/* Cookie-less binary download with custom headers. */
+async function reqBinary(path, headers) {
+  const r = await fetch(BASE + path, { headers, redirect: 'manual' });
+  return { status: r.status, buf: Buffer.from(await r.arrayBuffer()), location: r.headers.get('location') };
+}
+
+/* Open a sealed .ubk buffer (backup/archive format: MAGIC | iv | tag | ct). */
+function decryptSealed(buf, keyHex) {
+  const MAGIC = Buffer.from('UNIONBALLOT1\n', 'utf8');
+  assert.ok(buf.subarray(0, MAGIC.length).equals(MAGIC), 'sealed file carries the UNIONBALLOT1 header');
+  let off = MAGIC.length;
+  const iv = buf.subarray(off, off + 12); off += 12;
+  const tag = buf.subarray(off, off + 16); off += 16;
+  const d = crypto.createDecipheriv('aes-256-gcm', Buffer.from(keyHex, 'hex'), iv);
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(buf.subarray(off)), d.final()]);
 }
 
 (async () => {
@@ -204,6 +237,26 @@ async function req(method, path, body, useCookie = true) {
     assert.strictEqual(archive.encrypted_ballots.length, 6, 'archive preserves encrypted ballots');
     assert.ok(archive.audit_chain_verification.ok);
 
+    /* 12b. AUTOMATIC SEALED ARCHIVE AT TALLY — written without anyone asking,
+     * encrypted at rest under BACKUP_KEY, listed by metadata only. */
+    const archRow = db.prepare('SELECT * FROM archives WHERE election_id=?').get(eid);
+    assert.ok(archRow, 'tally automatically stored a sealed records archive');
+    assert.strictEqual(archRow.ballot_count, 6, 'archive metadata records the encrypted-ballot count');
+    assert.strictEqual(archRow.encrypted, 1, 'archive is encrypted at rest (BACKUP_KEY set)');
+    assert.strictEqual(archRow.election_title, '2026 Officer Election');
+    const archPath = path.join(process.env.DATA_DIR, 'archives', archRow.filename);
+    assert.ok(fs.existsSync(archPath), 'archive file exists under DATA_DIR/archives');
+    const fileBuf = fs.readFileSync(archPath);
+    assert.strictEqual(crypto.createHash('sha256').update(fileBuf).digest('hex'), archRow.sha256, 'stored sha256 matches the file');
+    const autoArchive = JSON.parse(decryptSealed(fileBuf, BACKUP_KEY_HEX).toString('utf8'));
+    assert.strictEqual(autoArchive.election.id, eid, 'sealed archive holds the tallied election');
+    assert.strictEqual(autoArchive.encrypted_ballots.length, 6, 'sealed archive preserves the encrypted ballots');
+    assert.deepStrictEqual(autoArchive.results.races[0].winners, ['Smith'], 'sealed archive preserves the results');
+    const archivePlain = decryptSealed(fileBuf, BACKUP_KEY_HEX).toString('latin1');
+    for (const s of shares) assert.ok(!archivePlain.includes(s) && !archivePlain.includes(s.split('-')[2]), 'sealed archive contains no key share');
+    for (const c of creds) assert.ok(!archivePlain.includes(c.replace(/-/g, '')) && !archivePlain.includes(c), 'sealed archive contains no credential plaintext');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='election.archive_stored'").get().n >= 1, 'automatic archive is audited');
+
     /* 13. FLORIDA PERC HARD STOP — contract ratification only */
     const baseVote = {
       race_title: 'Shall the tentative agreement be ratified?', race_seats: '1',
@@ -298,6 +351,99 @@ async function req(method, path, body, useCookie = true) {
     await req('POST', `/admin/members/${olive.id}/update`, { email: '', good_standing: '1', needs_paper_ballot: '0' });
     assert.strictEqual(db.prepare('SELECT email FROM members WHERE id=?').get(olive.id).email, null, 'clearing the email (paper path) still allowed');
 
+    /* 16. PLATFORM OWNER PAGE — key-gated, counts only, no PII.
+     * An ordinary committee session must NOT open it; only PLATFORM_OWNER_KEY
+     * (login form or X-Platform-Key header) does. */
+    r = await req('GET', '/platform'); // signed-in ADMIN session, no platform auth
+    assert.strictEqual(r.status, 200);
+    assert.ok(r.text.includes('Platform access'), 'committee session alone gets the key form, never the stats');
+    assert.ok(!r.text.includes('Members on roster'), 'no stats leak to a committee-only session');
+    r = await reqHeaders('GET', '/platform', {});
+    assert.ok(r.text.includes('Platform access'), 'anonymous request gets the key form');
+    r = await reqHeaders('GET', '/platform', { 'x-platform-key': 'wrong-key-wrong-key' });
+    assert.ok(r.text.includes('Platform access') && !r.text.includes('Members on roster'), 'wrong header key gets the form, not the stats');
+    r = await req('POST', '/platform/auth', { key: 'wrong-key-wrong-key' });
+    assert.strictEqual(r.status, 302, 'wrong key on the form is bounced');
+    r = await req('GET', '/platform');
+    assert.ok(r.text.includes('Platform access'), 'still locked after a wrong key');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='platform.auth_failed'").get().n >= 1, 'failed platform sign-in is audited (key not recorded)');
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE detail LIKE '%wrong-key-wrong-key%'").get().n, 0, 'submitted key never lands in the audit log');
+
+    r = await reqHeaders('GET', '/platform', { 'x-platform-key': PLATFORM_KEY });
+    assert.ok(r.text.includes('Instance stats &amp; recovery'), 'correct X-Platform-Key header opens the stats page');
+    assert.ok(r.text.includes('Members on roster'), 'roster size shown as a count');
+    assert.ok(r.text.includes('85.7%'), 'turnout rate computed from the eligibility snapshot (6 of 7)');
+    assert.ok(r.text.includes('2026 Officer Election'), 'sealed archive listed with election title');
+    for (const pii of ['Alice', 'Bob B', 'a@x.test', 'Hank H', 'hank@example.org', 'chair@']) {
+      assert.ok(!r.text.includes(pii), `platform page never shows PII (${pii})`);
+    }
+    r = await req('POST', '/platform/auth', { key: PLATFORM_KEY });
+    assert.strictEqual(r.location, '/platform', 'correct key on the form signs in');
+    r = await req('GET', '/platform');
+    assert.ok(r.text.includes('Instance stats &amp; recovery'), 'session flag opens the stats page');
+
+    /* 17. SEALED ARCHIVE DOWNLOAD from the platform page */
+    let dl = await reqBinary(`/platform/archives/${archRow.id}/download`, {});
+    assert.strictEqual(dl.status, 302, 'unauthenticated archive download is refused');
+    dl = await reqBinary(`/platform/archives/${archRow.id}/download`, { 'x-platform-key': PLATFORM_KEY });
+    assert.strictEqual(dl.status, 200, 'platform owner can download the archive');
+    const dlArchive = JSON.parse(decryptSealed(dl.buf, BACKUP_KEY_HEX).toString('utf8'));
+    assert.strictEqual(dlArchive.election.id, eid, 'downloaded archive is the tallied election');
+    assert.strictEqual(dlArchive.encrypted_ballots.length, 6, 'downloaded archive still holds only ENCRYPTED ballots');
+
+    /* 18. ACCOUNT RECOVERY EMAIL management (admin Accounts page) */
+    r = await req('GET', '/admin/users');
+    assert.ok(r.text.includes('Recovery email'), 'accounts page renders the recovery-email column');
+    r = await req('GET', '/login', null, false);
+    assert.ok(r.text.includes('Forgot your password?'), 'sign-in page links to the reset flow');
+    const chairId = db.prepare("SELECT id FROM users WHERE username='chair'").get().id;
+    await req('POST', `/admin/users/${chairId}/email`, { email: 'chair@broken' });
+    assert.strictEqual(db.prepare('SELECT email FROM users WHERE id=?').get(chairId).email, null, 'malformed recovery email rejected');
+    await req('POST', `/admin/users/${chairId}/email`, { email: 'chair@example.org' });
+    assert.strictEqual(db.prepare('SELECT email FROM users WHERE id=?').get(chairId).email, 'chair@example.org', 'recovery email saved');
+    await req('POST', '/admin/users', { display_name: 'Obs', username: 'obs1', password: 'observer-pass-1', role: 'observer', email: 'obs@example.org' });
+    assert.strictEqual(db.prepare("SELECT email FROM users WHERE username='obs1'").get().email, 'obs@example.org', 'recovery email stored at account creation');
+
+    /* 18b. FORGOT-PASSWORD without SMTP: nothing sent, no token minted,
+     * the visitor is pointed at platform support. */
+    r = await req('GET', '/forgot-password', null, false);
+    assert.ok(r.text.includes('Email delivery is not configured'), 'forgot-password explains the no-SMTP path');
+    r = await req('POST', '/forgot-password', { username: 'chair' }, false);
+    assert.strictEqual(r.status, 302);
+    assert.strictEqual(db.prepare('SELECT reset_token_hash FROM users WHERE id=?').get(chairId).reset_token_hash, null, 'no reset token minted when nothing can be emailed');
+
+    /* 19. ONE-TIME RESET LINK from the platform owner + full reset flow.
+     * The password is chosen by the account holder on the token page; no
+     * plaintext password or token is ever stored or logged. */
+    r = await req('POST', '/platform/reset-link', { username: 'nobody-here' });
+    assert.strictEqual(r.status, 302, 'unknown username refused');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM users WHERE reset_token_hash IS NOT NULL').get().n, 0, 'no token minted for unknown accounts');
+    r = await req('POST', '/platform/reset-link', { username: 'chair' });
+    const resetMatch = r.text.match(/\/reset-password\?token=([0-9a-f]{32})/);
+    assert.ok(resetMatch, 'one-time reset link displayed exactly once');
+    const resetToken = resetMatch[1];
+    assert.ok(!db.serialize().toString('latin1').includes(resetToken), 'reset token stored only as a hash');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='platform.reset_link_generated'").get().n >= 1, 'reset-link generation is audited');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM audit_log WHERE detail LIKE ?').get(`%${resetToken}%`).n, 0, 'token plaintext never appears in the audit log');
+
+    r = await req('GET', `/reset-password?token=${resetToken}`, null, false);
+    assert.strictEqual(r.status, 200);
+    assert.ok(r.text.includes('chair'), 'reset page names the account being reset');
+    r = await req('POST', '/reset-password', { token: resetToken, password: 'short', password_confirm: 'short' }, false);
+    assert.ok(r.status === 302 && r.location.includes('/reset-password'), 'short password rejected, token still live');
+    r = await req('POST', '/reset-password', { token: resetToken, password: 'new-committee-pass-9', password_confirm: 'different-pass-9' }, false);
+    assert.ok(r.status === 302 && r.location.includes('/reset-password'), 'mismatched confirmation rejected, token still live');
+    r = await req('POST', '/reset-password', { token: resetToken, password: 'new-committee-pass-9', password_confirm: 'new-committee-pass-9' }, false);
+    assert.strictEqual(r.location, '/login', 'successful reset lands on sign-in');
+    assert.strictEqual(db.prepare('SELECT reset_token_hash FROM users WHERE id=?').get(chairId).reset_token_hash, null, 'token consumed on success');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='auth.password_reset_completed'").get().n >= 1, 'reset completion is audited');
+    r = await req('GET', `/reset-password?token=${resetToken}`, null, false);
+    assert.strictEqual(r.status, 400, 'used reset token rejected');
+    r = await req('POST', '/login', { username: 'chair', password: 'committee-pass-1' });
+    assert.strictEqual(r.location, '/login', 'old password no longer works');
+    r = await req('POST', '/login', { username: 'chair', password: 'new-committee-pass-9' });
+    assert.strictEqual(r.location, '/admin', 'new password signs in');
+
     console.log('\nALL SMOKE TESTS PASSED ✔');
     console.log(`  Election #${eid}: 6 ballots, Smith elected (majority), dues adopted (2/3).`);
     console.log('  Verified: approval gate, one-time shares, hashed credentials, unlinkable ballots,');
@@ -306,6 +452,10 @@ async function req(method, path, body, useCookie = true) {
     console.log('  Florida PERC ratification hard stop (block, variance path, test/non-ratification/non-FL unaffected),');
     console.log('  roster-import email-syntax gate (bad rows reported with reasons, good rows imported,');
     console.log('  blank email = paper path untouched, member-edit rejects malformed addresses).');
+    console.log('  Verified: automatic sealed archive at tally (encrypted under BACKUP_KEY, no shares,');
+    console.log('  no credential plaintext), platform page gated by PLATFORM_OWNER_KEY only (committee');
+    console.log('  session refused, counts-only stats, no PII, archive download), and password recovery');
+    console.log('  (hash-only single-use expiring tokens, platform one-time link, old password dies).');
   } finally {
     server.close();
     fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });

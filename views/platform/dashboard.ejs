@@ -1,0 +1,107 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Platform owner</p>
+<h1>Instance stats &amp; recovery</h1>
+<p class="sub">Aggregate counts only — nothing on this page names a member, an email address, a
+phone number, or any local contact. This instance serves <strong>one local</strong>; if several
+locals ever report into shared infrastructure, their numbers roll up into this same shape.</p>
+<form method="post" action="/platform/logout" style="margin:0"><button class="btn small" type="submit">Sign out of platform page</button></form>
+
+<h2>Elections &amp; votes</h2>
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= stats.elections.total %></div><div class="l">Total votes</div></div>
+  <div class="stat"><div class="n"><%= stats.elections.completed %></div><div class="l">Completed (tallied)</div></div>
+  <div class="stat"><div class="n"><%= stats.elections.by_status.open %></div><div class="l">Open now</div></div>
+  <div class="stat"><div class="n"><%= stats.elections.by_status.closed %></div><div class="l">Closed, awaiting tally</div></div>
+  <div class="stat"><div class="n"><%= stats.elections.in_preparation %></div><div class="l">In preparation</div></div>
+</div>
+<table style="max-width:520px">
+<tr><th>Breakdown</th><th>Count</th></tr>
+<tr><td>Binding votes</td><td><%= stats.elections.binding %></td></tr>
+<tr><td>Test votes</td><td><%= stats.elections.test %></td></tr>
+<tr><td>Draft</td><td><%= stats.elections.by_status.draft %></td></tr>
+<tr><td>Credentials issued</td><td><%= stats.elections.by_status.credentials_issued %></td></tr>
+<tr><td>Open</td><td><%= stats.elections.by_status.open %></td></tr>
+<tr><td>Closed</td><td><%= stats.elections.by_status.closed %></td></tr>
+<tr><td>Tallied</td><td><%= stats.elections.by_status.tallied %></td></tr>
+</table>
+
+<h2>Ballots</h2>
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= stats.ballots.sealed_stored %></div><div class="l">Sealed ballots stored</div></div>
+  <div class="stat"><div class="n"><%= stats.ballots.counted_in_tallies %></div><div class="l">Counted in tallies</div></div>
+  <div class="stat"><div class="n"><%= stats.ballots.paper_recorded %></div><div class="l">Paper ballots recorded</div></div>
+</div>
+<table style="max-width:520px">
+<tr><th>Sealed ballots</th><th>Count</th></tr>
+<tr><td>In binding votes</td><td><%= stats.ballots.sealed_binding %></td></tr>
+<tr><td>In test votes</td><td><%= stats.ballots.sealed_test %></td></tr>
+</table>
+
+<h2>Turnout</h2>
+<p class="sub">Across votes where an eligibility snapshot exists (frozen at credential issuance).
+Overall = all voters over all eligible; average = mean of per-vote rates.</p>
+<table style="max-width:680px">
+<tr><th>Scope</th><th>Votes</th><th>Eligible</th><th>Voted</th><th>Overall</th><th>Average</th></tr>
+<% [['All', stats.turnout.all], ['Binding', stats.turnout.binding], ['Test', stats.turnout.test]].forEach(function (pair) { const t = pair[1]; %>
+<tr>
+  <td><%= pair[0] %></td>
+  <td><%= t.elections %></td>
+  <td><%= t.eligible %></td>
+  <td><%= t.voted %></td>
+  <td><%= t.overall_pct === null ? '—' : t.overall_pct + '%' %></td>
+  <td><%= t.average_pct === null ? '—' : t.average_pct + '%' %></td>
+</tr>
+<% }) %>
+</table>
+
+<h2>Roster</h2>
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= stats.roster_size %></div><div class="l">Members on roster</div></div>
+</div>
+<p class="sub">A count only. The roster itself — names, emails, standing — is visible to the
+local's election committee, never here.</p>
+
+<h2>Sealed records archives</h2>
+<p class="sub">Written automatically the moment a vote is tallied — the same records archive the
+committee can export by hand (configuration, eligibility snapshot, turnout, hashed credentials,
+<strong>encrypted</strong> ballots, results, audit log). If a local loses its login or its copy of
+the results, hand its archive back from here. No archive can open a ballot: decryption still
+requires the keyholders' shares, which are never stored.
+<% if (archivesEncrypted) { %>Archives are encrypted at rest (AES-256-GCM under
+<span class="mono">BACKUP_KEY</span>); restore with <span class="mono">scripts/decrypt-backup.js</span>.<% } else { %>
+<strong>BACKUP_KEY is not configured</strong>, so archives are stored as plaintext JSON — set a
+64-hex-character <span class="mono">BACKUP_KEY</span> to encrypt them at rest.<% } %></p>
+<% if (archives.length === 0) { %>
+  <div class="notice">No archives yet. One is written automatically each time a vote is tallied.</div>
+<% } else { %>
+<table>
+<tr><th>#</th><th>Election</th><th>Title</th><th>Tallied at</th><th>Sealed ballots</th><th>Stored</th><th></th></tr>
+<% archives.forEach(function (a) { %>
+<tr>
+  <td><%= a.id %></td>
+  <td><%= a.election_id %></td>
+  <td><%= a.election_title %></td>
+  <td><%= a.tallied_at || '—' %></td>
+  <td><%= a.ballot_count %></td>
+  <td><%= a.encrypted ? 'Encrypted' : 'Plain JSON' %> · <%= Math.max(1, Math.round(a.size_bytes / 1024)) %> KB</td>
+  <td><a href="/platform/archives/<%= a.id %>/download">Download</a></td>
+</tr>
+<% }) %>
+</table>
+<% } %>
+
+<h2>Committee password recovery</h2>
+<p class="sub">Generate a <strong>one-time reset link</strong> for a committee or observer
+account that is locked out<% if (smtp) { %> and cannot use the emailed
+<a href="/forgot-password">forgot-password</a> flow<% } else { %> (email delivery is not
+configured on this instance, so this is the only reset path)<% } %>. The link is shown exactly
+once, works exactly once, and expires in <%= resetTtlMinutes %> minutes. The account holder
+chooses their own new password — no password is ever emailed, displayed, or stored in plaintext.
+Verify who you are talking to before generating one: this link takes over the account.</p>
+<form method="post" action="/platform/reset-link" style="max-width:420px">
+  <label for="ru">Account username</label>
+  <input id="ru" type="text" name="username" required autocomplete="off">
+  <button class="btn" type="submit">Generate one-time reset link</button>
+</form>
+<%- include('../partials/foot') %>

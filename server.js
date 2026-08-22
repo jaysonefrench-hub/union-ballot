@@ -184,9 +184,18 @@ app.post('/logout', (req, res) => {
 
 /* ----- routes ----- */
 app.use('/', require('./src/routes/voter')({ flash }));
+/* Password recovery (/forgot-password, /reset-password): public by nature —
+ * the whole point is that the person is locked out — protected by hash-only
+ * single-use tokens, not sessions. */
+app.use('/', require('./src/routes/recovery')({ flash }));
 app.use('/admin', requireRole('admin'), require('./src/routes/backup')({ flash }));
 app.use('/admin', requireRole('admin'), require('./src/routes/admin')({ flash }));
 app.use('/observe', requireRole('observer', 'admin'), require('./src/routes/observer')({ flash }));
+/* Platform owner (aggregate stats + local recovery): gated inside the router
+ * by PLATFORM_OWNER_KEY — deliberately NOT by requireRole. A committee or
+ * observer session grants nothing here, and the platform owner needs no
+ * committee account. 404s unless the key is configured. */
+app.use('/platform', require('./src/routes/platform')({ flash }));
 
 app.use((req, res) => res.status(404).render('error', { title: 'Not found', message: 'That page does not exist.' }));
 

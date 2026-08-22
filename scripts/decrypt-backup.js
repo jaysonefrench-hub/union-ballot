@@ -1,13 +1,19 @@
 /**
- * scripts/decrypt-backup.js — restore a Union Ballot encrypted backup (.ubk).
+ * scripts/decrypt-backup.js — open a Union Ballot encrypted file (.ubk):
+ * either a full database backup, or a sealed per-election records archive
+ * (written automatically at tally under data/archives/). Both use the same
+ * format, so this one tool opens both.
  *
  * Usage:
- *   BACKUP_KEY=<64 hex chars> node scripts/decrypt-backup.js <input.ubk> <output.db>
+ *   BACKUP_KEY=<64 hex chars> node scripts/decrypt-backup.js <input.ubk> <output>
  *
- * Produces a plain SQLite database file you can open with any SQLite tool.
- * Uses only Node's built-in crypto — no dependencies, so it runs anywhere.
- * The backup format is:  "UNIONBALLOT1\n" | iv(12) | gcmTag(16) | ciphertext
- * (AES-256-GCM). See src/routes/backup.js for how backups are created.
+ * For a database backup the output is a plain SQLite file (open with any
+ * SQLite tool); for a records archive it is the plain JSON archive. Uses only
+ * Node's built-in crypto — no dependencies, so it runs anywhere.
+ * The file format is:  "UNIONBALLOT1\n" | iv(12) | gcmTag(16) | ciphertext
+ * (AES-256-GCM). See src/routes/backup.js and src/archives.js for creation.
+ * Note: decrypting an archive never exposes a ballot — the ballots inside it
+ * are themselves still sealed to the election key held by the keyholders.
  */
 'use strict';
 
@@ -18,7 +24,8 @@ const MAGIC = Buffer.from('UNIONBALLOT1\n', 'utf8');
 const [, , inFile, outFile] = process.argv;
 
 if (!inFile || !outFile) {
-  console.error('Usage: BACKUP_KEY=<64 hex chars> node scripts/decrypt-backup.js <input.ubk> <output.db>');
+  console.error('Usage: BACKUP_KEY=<64 hex chars> node scripts/decrypt-backup.js <input.ubk> <output>');
+  console.error('  (works for database backups and for sealed records archives from data/archives/)');
   process.exit(2);
 }
 const keyHex = (process.env.BACKUP_KEY || '').trim();
@@ -48,4 +55,4 @@ try {
   process.exit(1);
 }
 fs.writeFileSync(outFile, plain);
-console.log(`Wrote ${plain.length} bytes to ${outFile}. Open it with any SQLite tool.`);
+console.log(`Wrote ${plain.length} bytes to ${outFile} (SQLite database if this was a backup; JSON if it was a records archive).`);

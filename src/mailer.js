@@ -97,4 +97,38 @@ electronic ballot delivery.
   });
 }
 
-module.exports = { smtpConfigured, sendCredentialEmail, sendVerificationEmail };
+/**
+ * Committee-account password reset. The link carries a single-use,
+ * short-lived token; the system stores only its hash. The email NEVER
+ * contains a password — old or new. The recipient chooses a new password on
+ * the token page, so nothing recoverable ever transits or lands in a log.
+ */
+async function sendPasswordResetEmail({ to, displayName, resetUrl, ttlMinutes }) {
+  if (!smtpConfigured()) throw new Error('SMTP not configured');
+  const t = transporter();
+  await t.sendMail({
+    from: process.env.MAIL_FROM,
+    to,
+    subject: 'Reset your election-committee account password',
+    text:
+`${displayName},
+
+A password reset was requested for your election-committee account.
+
+Choose a new password by opening this link:
+
+    ${resetUrl}
+
+The link works exactly once and expires in ${ttlMinutes} minutes. Your
+password is never emailed or displayed — you will set a new one of your own
+choosing on that page.
+
+If you did not request this, you can ignore this email: your current
+password still works and nothing has changed. The request has been recorded
+in the tamper-evident audit log either way.
+
+— Election system`,
+  });
+}
+
+module.exports = { smtpConfigured, sendCredentialEmail, sendVerificationEmail, sendPasswordResetEmail };

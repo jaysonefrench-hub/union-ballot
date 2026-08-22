@@ -1,0 +1,15 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Platform owner</p>
+<h1>Platform access</h1>
+<p class="sub">This page is for the operator who hosts this instance — not the election committee
+and not observers. A committee sign-in does not open it; only the platform owner key does.</p>
+<form method="post" action="/platform/auth" style="max-width:420px">
+  <label for="k">Platform owner key</label>
+  <input id="k" type="password" name="key" required autocomplete="off">
+  <button class="btn primary" type="submit">Open platform page</button>
+</form>
+<p class="sub" style="margin-top:18px">The key is set by the <span class="mono">PLATFORM_OWNER_KEY</span>
+environment variable and is never stored by this application. Committee members looking for their
+elections should <a href="/login">sign in here</a> instead.</p>
+<%- include('../partials/foot') %>
