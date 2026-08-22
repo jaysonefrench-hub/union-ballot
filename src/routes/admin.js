@@ -20,6 +20,7 @@ const {
   generateVerifyToken, hashVerifyToken,
 } = require('../crypto');
 const { smtpConfigured, sendCredentialEmail, sendVerificationEmail } = require('../mailer');
+const { checkEmailSyntax } = require('../email-syntax');
 
 const BASE_URL = () => process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
@@ -103,26 +104,60 @@ module.exports = function adminRoutes({ flash }) {
 
   router.post('/members/import', async (req, res, next) => {
     try {
-      const lines = String(req.body.roster || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      /*
+       * EMAIL SYNTAX GATE (import): an address that cannot receive mail as
+       * written (jane@gmail, jane@@x.com, "jane smith@…") would sit on the
+       * roster as "Pending" forever — its verification link can never arrive.
+       * So each row is checked BEFORE insert: valid rows import exactly as
+       * before; rows with a malformed email (or no name) are NOT imported and
+       * are reported back line-by-line with the reason, so the committee can
+       * fix and re-import precisely those rows. An EMPTY email is never an
+       * error — that member uses the paper-ballot path, unchanged. Whether a
+       * well-formed address is real and the member's own is still proven only
+       * by the magic-link verification flow.
+       */
+      const rawLines = String(req.body.roster || '').split(/\r?\n/);
+      const valid = [];    // { name, email|null, num|null }
+      const rejected = []; // { line, raw, name, email, reason }
+      rawLines.forEach((rawLine, idx) => {
+        const line = rawLine.trim();
+        if (!line) return; // blank line — not data, nothing to report
+        const [name, email, num] = line.split(',').map((s) => (s || '').trim());
+        if (!name) {
+          rejected.push({ line: idx + 1, raw: line, name: '', email: email || '', reason: 'missing the member name (format: Name, email, member number)' });
+          return;
+        }
+        if (email) {
+          const check = checkEmailSyntax(email);
+          if (!check.ok) {
+            rejected.push({ line: idx + 1, raw: line, name, email, reason: check.reason });
+            return;
+          }
+        }
+        valid.push({ name, email: email || null, num: num || null });
+      });
+
       const ins = db.prepare('INSERT INTO members (name, email, member_number) VALUES (?,?,?)');
       const withEmail = []; // { id, name, email } — need verification before electronic delivery
-      let added = 0;
       db.transaction(() => {
-        for (const line of lines) {
-          const [name, email, num] = line.split(',').map((s) => (s || '').trim());
-          if (!name) continue;
-          const info = ins.run(name, email || null, num || null);
-          if (email) withEmail.push({ id: info.lastInsertRowid, name, email });
-          added++;
+        for (const v of valid) {
+          const info = ins.run(v.name, v.email, v.num);
+          if (v.email) withEmail.push({ id: info.lastInsertRowid, name: v.name, email: v.email });
         }
       })();
-      audit(req.session.user.username, 'roster.import', `${added} members added to roster (${withEmail.length} with email, pending verification)`);
+      const added = valid.length;
+      /* Counts only in the audit log — the rejected addresses themselves are
+       * shown to the committee on the report page, not written to the
+       * observer-visible permanent record. */
+      audit(req.session.user.username, 'roster.import',
+        `${added} members added to roster (${withEmail.length} with email, pending verification)`
+        + (rejected.length ? `; ${rejected.length} row(s) NOT imported (invalid email syntax or missing name), reported to the committee for correction` : ''));
 
       /* Members with an email address start UNVERIFIED. If SMTP is configured,
        * send each a verification link now; otherwise they stay pending and the
        * committee sends links per member from the roster page. */
+      let sent = 0; const failures = [];
       if (smtpConfigured() && withEmail.length > 0) {
-        let sent = 0; const failures = [];
         for (const m of withEmail) {
           const verifyUrl = beginEmailVerification(m.id);
           try {
@@ -131,6 +166,20 @@ module.exports = function adminRoutes({ flash }) {
           } catch (err) { failures.push(`${m.name} <${m.email}>: ${err.message}`); }
         }
         audit(req.session.user.username, 'roster.verification_emails_sent', `${sent} email-verification link(s) sent after import, ${failures.length} failed`);
+      }
+
+      /* Anything rejected → show the full report page (row/name/email/reason
+       * plus a pre-filled fix-and-reimport form). Never silently drop a row,
+       * and never fail the whole upload over a few bad addresses. */
+      if (rejected.length > 0) {
+        return res.render('admin/import-report', {
+          title: 'Roster import report',
+          added, rejected, sent, failures,
+          withEmailCount: withEmail.length, smtp: smtpConfigured(),
+        });
+      }
+
+      if (smtpConfigured() && withEmail.length > 0) {
         flash(req, failures.length ? 'error' : 'ok',
           `${added} member(s) added. Verification links emailed to ${sent} member(s)`
           + (failures.length ? `; ${failures.length} failed — use Resend on those rows.` : '. Electronic credentials can only be issued to verified addresses.'));
@@ -149,6 +198,18 @@ module.exports = function adminRoutes({ flash }) {
       const good = req.body.good_standing === '1' ? 1 : 0;
       const paper = req.body.needs_paper_ballot === '1' ? 1 : 0;
       const newEmail = (req.body.email || '').trim() || null;
+      /* Same syntax gate as import. The whole save is rejected (not partially
+       * applied) so the committee never has to guess which fields took.
+       * Clearing the email is always allowed — that is the paper path. */
+      if (newEmail) {
+        const check = checkEmailSyntax(newEmail);
+        if (!check.ok) {
+          flash(req, 'error',
+            `Not saved. "${newEmail}" does not look like a deliverable email address — ${check.reason}. `
+            + `Fix the address and save again, or clear the email field to move ${m.name} to the paper-ballot path.`);
+          return res.redirect('/admin/members');
+        }
+      }
       const emailChanged = (newEmail || '') !== (m.email || '');
       db.prepare('UPDATE members SET good_standing=?, needs_paper_ballot=?, email=? WHERE id=?')
         .run(good, paper, newEmail, m.id);

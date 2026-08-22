@@ -2,7 +2,8 @@
  * scripts/smoke-test.js — Full end-to-end election against the live server.
  * Verifies: setup → roster → create (with IAFF approval gate) → key ceremony →
  * credentials → open → 6 ballots cast → close → tally with 3-of-5 shares →
- * majority/runoff math → anonymity properties of stored data.
+ * majority/runoff math → anonymity properties of stored data → roster-import
+ * email-syntax gate (report of rejected rows) → member-edit email gate.
  */
 'use strict';
 process.env.DATA_DIR = require('path').join(__dirname, '..', 'data-test');
@@ -238,12 +239,73 @@ async function req(method, path, body, useCookie = true) {
     await req('POST', '/admin/elections/new', { ...baseVote, title: 'OH TA Ratification', kind: 'contract_ratification', jurisdiction: 'OH' });
     assert.strictEqual(electionCount(), n0 + 5, 'non-Florida ratification not blocked');
 
+    /* 14. ROSTER IMPORT EMAIL-SYNTAX VALIDATION
+     * Bad addresses must be caught at import — reported row-by-row with a
+     * reason, never imported (they would sit as "Pending" forever), and never
+     * failing the whole upload: valid rows still land on the roster. */
+    const { checkEmailSyntax } = require('../src/email-syntax');
+    for (const g of ['jane@example.com', 'j.smith+union@mail.example.co.uk', "o'brien@example.org", 'x_y-z@my-local.us']) {
+      assert.ok(checkEmailSyntax(g).ok, `validator accepts ${g}`);
+    }
+    for (const b of ['jane@gmail', 'jane@@example.com', 'jane smith@example.com', 'jane@', '@example.com',
+      'jane@.com', 'jane@example.', 'jane@example..com', 'jane.example.com', 'jane@example.c',
+      'jane@example.123', 'jane@-example.com', '.jane@example.com', 'ja..ne@example.com']) {
+      const c = checkEmailSyntax(b);
+      assert.ok(!c.ok && c.reason, `validator rejects ${b} with a reason`);
+    }
+
+    const membersBefore = db.prepare('SELECT COUNT(*) n FROM members').get().n;
+    r = await req('POST', '/admin/members/import', {
+      roster: [
+        'Hank H, hank@example.org, 20',     // valid — must import
+        'Ivy I, ivy@gmail, 21',             // missing .com/.org ending
+        'Jack J, jack@@example.com, 22',    // double @@
+        'Kim K, kim smith@example.com, 23', // space in address
+        'Lee L, lee@.com, 24',              // empty domain section
+        'Mona M, mona.example.com, 25',     // missing @
+        'Nora N (paper), , 26',             // blank email — paper path, must import
+        ', orphan@example.com, 27',         // missing name
+      ].join('\n'),
+    });
+    assert.strictEqual(r.status, 200, 'import with rejected rows renders the report page (no silent redirect)');
+    assert.ok(r.text.includes('Import report'), 'report page shown');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM members').get().n, membersBefore + 2,
+      'only the valid row and the blank-email (paper) row were imported');
+    assert.ok(db.prepare('SELECT id FROM members WHERE name=?').get('Hank H'), 'valid row imported alongside rejects');
+    assert.ok(db.prepare('SELECT id FROM members WHERE name=?').get('Nora N (paper)'), 'blank email is NOT a format error (paper path)');
+    for (const name of ['Ivy I', 'Jack J', 'Kim K', 'Lee L', 'Mona M']) {
+      assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM members WHERE name=?').get(name).n, 0, `${name} not imported`);
+      assert.ok(r.text.includes(name), `${name} listed on the report`);
+    }
+    assert.ok(r.text.includes('ivy@gmail'), 'rejected address shown on the report');
+    assert.ok(r.text.includes('has no ending'), 'missing-TLD reason shown');
+    assert.ok(r.text.includes('more than one'), 'double-@ reason shown');
+    assert.ok(r.text.includes('missing the member name'), 'nameless row reported, not silently skipped');
+    assert.ok(r.text.includes('Ivy I, ivy@gmail, 21'), 'rejected raw rows pre-filled for fix-and-reimport');
+    /* a fully-valid upload keeps the original flash + redirect behavior */
+    r = await req('POST', '/admin/members/import', { roster: 'Olive O, olive@example.net, 28' });
+    assert.strictEqual(r.status, 302, 'clean import still redirects to the roster (unchanged path)');
+
+    /* 15. MEMBER-EDIT EMAIL VALIDATION — same gate, whole save rejected */
+    const olive = db.prepare('SELECT * FROM members WHERE name=?').get('Olive O');
+    await req('POST', `/admin/members/${olive.id}/update`, { email: 'olive@broken', good_standing: '0', needs_paper_ballot: '1' });
+    const oliveAfter = db.prepare('SELECT * FROM members WHERE id=?').get(olive.id);
+    assert.strictEqual(oliveAfter.email, 'olive@example.net', 'invalid email edit not saved');
+    assert.strictEqual(oliveAfter.good_standing, 1, 'whole update rejected — standing flag unchanged too');
+    assert.strictEqual(oliveAfter.needs_paper_ballot, 0, 'whole update rejected — paper flag unchanged too');
+    await req('POST', `/admin/members/${olive.id}/update`, { email: 'olive@example.org', good_standing: '1', needs_paper_ballot: '0' });
+    assert.strictEqual(db.prepare('SELECT email FROM members WHERE id=?').get(olive.id).email, 'olive@example.org', 'valid email edit saved');
+    await req('POST', `/admin/members/${olive.id}/update`, { email: '', good_standing: '1', needs_paper_ballot: '0' });
+    assert.strictEqual(db.prepare('SELECT email FROM members WHERE id=?').get(olive.id).email, null, 'clearing the email (paper path) still allowed');
+
     console.log('\nALL SMOKE TESTS PASSED ✔');
     console.log(`  Election #${eid}: 6 ballots, Smith elected (majority), dues adopted (2/3).`);
     console.log('  Verified: approval gate, one-time shares, hashed credentials, unlinkable ballots,');
     console.log('  date-only redemption, double-vote rejection, 3-of-5 threshold tally, audit chain, archive.');
     console.log('  Verified: email-verification gate (block/verify/single-use token/reset-on-change),');
-    console.log('  Florida PERC ratification hard stop (block, variance path, test/non-ratification/non-FL unaffected).');
+    console.log('  Florida PERC ratification hard stop (block, variance path, test/non-ratification/non-FL unaffected),');
+    console.log('  roster-import email-syntax gate (bad rows reported with reasons, good rows imported,');
+    console.log('  blank email = paper path untouched, member-edit rejects malformed addresses).');
   } finally {
     server.close();
     fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
