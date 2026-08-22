@@ -26,9 +26,17 @@ npm start         # http://localhost:3000
 
 Visit `/setup` on first run to create the election-committee admin account. Add observer accounts (one per candidate) under Accounts. The voter-facing page is the root URL — voters never log in; they only enter their credential.
 
+## Email verification before electronic credentials
+
+A voting credential is only as trustworthy as the address it is sent to. Every member added to the roster with an email address starts **unverified**: the system emails them a single-use, expiring confirmation link (stored only as a hash — the same discipline as credentials), and only after the member clicks it is the address marked verified. Electronic credentials **cannot be issued while any electronic-path member remains unverified** — the committee gets a clear error naming the pending members, with the choice to resend their links or flag them for paper. The roster page shows Verified / Pending per member with a resend button; if SMTP is not configured, the resend button instead displays a one-time link for manual delivery. Changing a member's email resets their verification. None of this touches the paper-ballot path: members without email, or flagged for paper, never need to verify anything.
+
+## Jurisdiction gates — Florida PERC contract ratification
+
+Election creation now records the **jurisdiction** (state) of the bargaining unit. For a **binding electronic contract-ratification vote in Florida**, the system is a hard stop: Fla. Admin. Code 60CC-4.002 requires ratification by secret ballot at a meeting or by mail with a publicly announced count, Florida PERC has denied electronic-ratification requests (May 2022), and no general PERC approval of electronic ratification exists. Creation (and, defense-in-depth, credential issuance and opening) is blocked unless the committee explicitly checks that the unit holds a **current PERC variance for electronic ratification** — that acknowledgment is the committee's own recorded claim, stored on the election and in the audit log; the system never verifies or implies PERC or OLMS approval. Florida officer elections, bylaws amendments, other non-ratification votes, test elections, and every non-Florida jurisdiction are unaffected. See `COMPLIANCE.md` for the full note.
+
 ## Configuration (environment variables)
 
-`PORT` — listen port (default 3000). `BASE_URL` — the public https URL, used in credential emails. `DATA_DIR` — where the SQLite database lives (default `./data`). `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` — email delivery of credentials; if unset, credentials are shown once for mail-merge delivery instead. `REISSUE_KEY` — optional 64-hex-char key for the encrypted member↔credential map used only to void-and-reissue lost credentials (auto-generated if unset). `NODE_ENV=production` — enables secure cookies (requires HTTPS).
+`PORT` — listen port (default 3000). `BASE_URL` — the public https URL, used in credential and verification emails. `VERIFY_TOKEN_TTL_DAYS` — how long an email-verification link stays valid (default 14). `DATA_DIR` — where the SQLite database lives (default `./data`). `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` — email delivery of credentials; if unset, credentials are shown once for mail-merge delivery instead. `REISSUE_KEY` — optional 64-hex-char key for the encrypted member↔credential map used only to void-and-reissue lost credentials (auto-generated if unset). `NODE_ENV=production` — enables secure cookies (requires HTTPS).
 
 ## Production deployment
 
@@ -36,7 +44,7 @@ Run behind HTTPS — this is non-negotiable for a real election. The simplest de
 
 ## Running an election
 
-The workflow the app enforces: create the vote (for officer, delegate, and dues votes it requires you to record IAFF Legal Department approval of the platform and procedures, per the IAFF Best Practices and Model Rules) → the key ceremony displays the decryption shares exactly once for distribution to keyholders → issue credentials (eligibility is frozen from the roster at that moment; members without email or who opt for paper are listed for the alternative method) → open voting → close voting → tally ceremony with K keyholders and observers present → publish results and export the records archive.
+The workflow the app enforces: create the vote (for officer, delegate, and dues votes it requires you to record IAFF Legal Department approval of the platform and procedures, per the IAFF Best Practices and Model Rules) → the key ceremony displays the decryption shares exactly once for distribution to keyholders → issue credentials (eligibility is frozen from the roster at that moment; electronic credentials go only to verified email addresses, and members without email or who opt for paper are listed for the alternative method) → open voting → close voting → tally ceremony with K keyholders and observers present → publish results and export the records archive.
 
 Run a **test election** first. Mark it as a test at creation, let candidate observers cast practice ballots and watch the tally — OLMS explicitly views observable test runs favorably, and it builds member confidence.
 

@@ -62,4 +62,39 @@ For ballot secrecy, delete this email after you vote.
   });
 }
 
-module.exports = { smtpConfigured, sendCredentialEmail };
+/**
+ * Email-address verification before electronic credential delivery.
+ * The link carries a single-use, high-entropy token; the system stores only
+ * its hash. Members on the paper-ballot path never receive (or need) this.
+ */
+async function sendVerificationEmail({ to, memberName, verifyUrl }) {
+  if (!smtpConfigured()) throw new Error('SMTP not configured');
+  const t = transporter();
+  await t.sendMail({
+    from: process.env.MAIL_FROM,
+    to,
+    subject: 'Confirm your email address for electronic voting',
+    text:
+`${memberName},
+
+Your local's election committee added this email address to the voter roster
+for ELECTRONIC ballot delivery. Before any voting credential can be sent to
+this address, you must confirm that it is yours and that it works.
+
+Confirm your email address by opening this link:
+
+    ${verifyUrl}
+
+The link works exactly once and expires. If it has expired, ask the election
+committee to resend it.
+
+If you did not expect this — or you prefer a paper ballot — reply to the
+election committee. Members who do not confirm an email address are provided
+the alternative paper-ballot method instead; confirming is only required for
+electronic ballot delivery.
+
+— Election Committee`,
+  });
+}
+
+module.exports = { smtpConfigured, sendCredentialEmail, sendVerificationEmail };

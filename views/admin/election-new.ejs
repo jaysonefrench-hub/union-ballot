@@ -21,6 +21,37 @@
         <option value="other">Other</option>
       </select>
     </div>
+    <div>
+      <label for="jurisdiction">Jurisdiction (state of the bargaining unit / local)</label>
+      <select id="jurisdiction" name="jurisdiction" required>
+        <option value="">— select —</option>
+        <% jurisdictions.forEach(function (j) { %>
+          <option value="<%= j[0] %>"><%= j[1] %></option>
+        <% }) %>
+      </select>
+    </div>
+  </div>
+
+  <div class="notice warn" id="percNotice" style="display:none">
+    <strong>Florida contract ratification cannot be conducted electronically without a PERC variance.</strong>
+    Florida Administrative Code 60CC-4.002 requires ratification of a collective bargaining agreement by
+    secret ballot <em>at a meeting or by mail ballot</em>, with the count publicly announced. Florida PERC
+    has denied requests to conduct ratification votes electronically (May 2022 denials; see also
+    <em>Beightol</em>), and there is <strong>no general PERC approval of electronic ratification voting</strong>.
+    This system has no PERC (or OLMS) pre-approval and cannot grant one.
+    <p style="margin:10px 0 6px"><strong>Your options:</strong> conduct the ratification at a meeting or by
+    mail ballot; mark this vote as a <em>test election</em>; or proceed only if your unit itself holds a
+    current, specific PERC variance permitting electronic ratification.</p>
+    <label style="margin-top:8px">
+      <input type="checkbox" id="percAck" name="perc_variance_ack" value="1" style="width:auto">
+      We have a <strong>current PERC variance for electronic ratification</strong> covering this unit, and we
+      understand this system does not verify or provide PERC approval. This acknowledgment is recorded on the
+      election and in the audit log.
+    </label>
+    <label for="percRef" style="margin-top:8px">Variance date / reference (for the record)</label>
+    <input id="percRef" type="text" name="perc_variance_ref" placeholder="e.g., PERC variance order dated 2026-03-15, case no. …">
+    <p class="sub" id="percBlockedMsg" style="margin-top:8px"><strong>Creation is blocked</strong> until the
+    variance box is checked or the vote is marked as a test election.</p>
   </div>
 
   <div class="notice warn" id="iaffApprovalNotice">
@@ -71,7 +102,7 @@
   <label for="kh">Keyholder names/roles, one per line (recorded in the audit log)</label>
   <textarea id="kh" name="keyholders" rows="4" placeholder="Rep. for Candidate Smith&#10;Rep. for Candidate Jones&#10;Neutral: retired member P. Alvarez"></textarea>
 
-  <button class="btn primary" type="submit">Create vote &amp; generate keys</button>
+  <button class="btn primary" type="submit" id="createBtn">Create vote &amp; generate keys</button>
 </form>
 
 <script>
@@ -98,9 +129,34 @@
   var SECRET_KINDS = ['officer_election', 'delegate_election', 'dues_assessment'];
   var approvalNotice = document.getElementById('iaffApprovalNotice');
   function syncApproval(kind) { approvalNotice.style.display = SECRET_KINDS.indexOf(kind) >= 0 ? '' : 'none'; }
-  syncApproval(document.getElementById('kind').value);
+
+  /* Florida PERC ratification hard stop (mirrors the server-side gate, which
+   * enforces it regardless of what this script does). */
+  var kindEl = document.getElementById('kind');
+  var jurEl = document.getElementById('jurisdiction');
+  var percNotice = document.getElementById('percNotice');
+  var percAck = document.getElementById('percAck');
+  var percBlockedMsg = document.getElementById('percBlockedMsg');
+  var testEl = document.querySelector('input[name=is_test]');
+  var createBtn = document.getElementById('createBtn');
+  function syncPerc() {
+    var applies = jurEl.value === 'FL' && kindEl.value === 'contract_ratification';
+    percNotice.style.display = applies ? '' : 'none';
+    var isTest = testEl.checked;
+    var blocked = applies && !isTest && !percAck.checked;
+    createBtn.disabled = blocked;
+    percBlockedMsg.style.display = (applies && !isTest && !percAck.checked) ? '' : 'none';
+    if (!applies) { percAck.checked = false; document.getElementById('percRef').value = ''; }
+  }
+  jurEl.addEventListener('change', syncPerc);
+  percAck.addEventListener('change', syncPerc);
+  testEl.addEventListener('change', syncPerc);
+
+  syncApproval(kindEl.value);
+  syncPerc();
   document.getElementById('kind').addEventListener('change', function () {
     syncApproval(this.value);
+    syncPerc();
     if (wrap.children.length === 0 || (wrap.children.length === 1 && !wrap.querySelector('input[name=race_title]').value)) {
       wrap.innerHTML = ''; n = 0;
       var k = this.value;

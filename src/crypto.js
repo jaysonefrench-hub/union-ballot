@@ -203,6 +203,26 @@ function hashCredential(credential, salt) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Email-verification tokens                                           */
+/* ------------------------------------------------------------------ */
+/*
+ * Single-use tokens proving a roster email address is real and reachable
+ * before any electronic voting credential is sent to it. 128 bits from the
+ * CSPRNG; stored only as an UNSALTED SHA-256 hash so the member row can be
+ * found by direct lookup. Unsalted is appropriate for the same reason as
+ * credentials: the input is uniformly random, so the space cannot be brute
+ * forced regardless of hash speed, and no two members ever share a token.
+ */
+
+function generateVerifyToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function hashVerifyToken(token) {
+  return crypto.createHash('sha256').update(String(token || '').trim().toLowerCase()).digest('hex');
+}
+
+/* ------------------------------------------------------------------ */
 /* Symmetric encryption for the credential->member reissue map         */
 /* ------------------------------------------------------------------ */
 /*
@@ -295,6 +315,8 @@ module.exports = {
   generateCredential,
   normalizeCredential,
   hashCredential,
+  generateVerifyToken,
+  hashVerifyToken,
   aesEncrypt,
   aesDecrypt,
   chainHash,
