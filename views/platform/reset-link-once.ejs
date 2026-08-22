@@ -1,0 +1,20 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Shown exactly once — the system keeps only a hash</p>
+<h1>Reset link for <%= account.username %></h1>
+<div class="notice warn">
+  <strong>Deliver this link to the account holder yourself</strong>, over a channel you trust
+  (a phone call to a number you already have, or in person — not a reply to whoever asked).
+  Anyone who opens it can set a new password for the
+  <%= account.role %> account <strong><%= account.display_name %></strong> (<span class="mono"><%= account.username %></span>).
+  It works exactly once, expires in <%= ttlMinutes %> minutes, and any earlier reset link for
+  this account no longer works.
+</div>
+<p>Link to deliver:</p>
+<p class="mono" style="word-break:break-all"><%= resetUrl %></p>
+<p class="sub">The account holder chooses their own new password on that page. No password — old
+or new — is ever emailed, displayed, or stored in plaintext, and this link cannot be retrieved
+again. The generation of this link is recorded in the tamper-evident audit log (the link itself
+is not).</p>
+<a class="btn primary" href="/platform">Done — I have delivered this link</a>
+<%- include('../partials/foot') %>
