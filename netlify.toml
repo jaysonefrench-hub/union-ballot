@@ -1,0 +1,4 @@
+# Netlify serves the marketing landing for union-ballot.com from www/.
+# The voter app itself (server.js, src/, views/) deploys to Render, not Netlify.
+[build]
+  publish = "www"
