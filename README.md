@@ -60,6 +60,11 @@ Passwords are stored only as bcrypt hashes, so there is nothing to "look up" —
 
 `PORT` — listen port (default 3000). `BASE_URL` — the public https URL, used in credential, verification, and password-reset emails. `VERIFY_TOKEN_TTL_DAYS` — how long an email-verification link stays valid (default 14). `RESET_TOKEN_TTL_MINUTES` — how long a password-reset link stays valid (default 60). `DATA_DIR` — where the SQLite database (and `archives/`) lives (default `./data`). `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` — email delivery of credentials; if unset, credentials are shown once for mail-merge delivery instead. `REISSUE_KEY` — optional 64-hex-char key for the encrypted member↔credential map used only to void-and-reissue lost credentials (auto-generated if unset). `BACKUP_KEY` — 64-hex-char key that encrypts downloadable database backups and the automatic records archives at rest; keep it off the server and separate from `REISSUE_KEY`. `PLATFORM_OWNER_KEY` — strong secret (16+ characters) that enables the `/platform` owner page; unset = page disabled. `NODE_ENV=production` — enables secure cookies (requires HTTPS).
 
+## Hosted URLs
+
+- **union-ballot.com** — marketing landing (`www/`, Netlify). Apex stays on this site; do not point it at Render.
+- **vote.union-ballot.com** — voting app (Render).
+
 ## Production deployment
 
 Run behind HTTPS — this is non-negotiable for a real election. The simplest defensible setup is a small VPS with Caddy or nginx terminating TLS in front of `node server.js` under systemd, with `NODE_ENV=production` and `BASE_URL` set. Back up the `data` directory; it contains only hashed credentials and encrypted ballots, but it *is* the election record you must retain for one year. Record the exact commit hash of the deployed code (`git rev-parse HEAD`) in your election records so the retained source matches what actually ran. The key shares are the one thing that cannot be recovered: if fewer than the threshold number survive, the ballots can never be opened and the election must be rerun, so treat share custody as seriously as a physical ballot box key.
