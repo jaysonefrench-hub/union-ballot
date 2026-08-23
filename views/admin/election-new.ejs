@@ -80,7 +80,20 @@
     </div>
   </div>
 
-  <label style="margin-top:18px"><input type="checkbox" name="is_test" value="1" style="width:auto"> This is a <strong>test election</strong> (practice ballots for observer verification — clearly labeled, results don't count)</label>
+  <label style="margin-top:18px"><input type="checkbox" name="is_test" value="1" id="isTest" style="width:auto"> This is a <strong>test election</strong> (DEMO / TEST — not a binding election; practice ballots, results don't count)</label>
+  <div class="notice seal" id="demoSkipNotice" style="display:none">
+    <strong>DEMO / TEST dry-run — not a binding election.</strong>
+    New test elections skip magic-link email verification by default so the committee can issue
+    electronic credentials without SMTP or members clicking confirmation links. Roster email
+    <em>syntax</em> is still validated on import/edit. The paper-ballot path is unchanged.
+    Binding elections can never skip verification: this flag is stored on the election, not as a
+    server-wide setting, so a production vote on the same instance stays gated.
+    <label style="margin-top:10px">
+      <input type="hidden" name="demo_skip_email_verify" value="0">
+      <input type="checkbox" name="demo_skip_email_verify" value="1" id="demoSkip" checked style="width:auto">
+      Skip email verification for electronic credentials on this TEST election (default on)
+    </label>
+  </div>
 
   <h2>Races / questions</h2>
   <p class="sub">For a yes/no question (ratification, bylaw, budget), enter the question as the race title with candidates "Yes" and "No". Bylaw amendments typically require a two-thirds threshold — check your CBL.</p>
@@ -137,8 +150,14 @@
   var percNotice = document.getElementById('percNotice');
   var percAck = document.getElementById('percAck');
   var percBlockedMsg = document.getElementById('percBlockedMsg');
-  var testEl = document.querySelector('input[name=is_test]');
+  var testEl = document.getElementById('isTest') || document.querySelector('input[name=is_test]');
+  var demoSkipNotice = document.getElementById('demoSkipNotice');
   var createBtn = document.getElementById('createBtn');
+  function syncTestNotice() {
+    if (demoSkipNotice) demoSkipNotice.style.display = testEl.checked ? '' : 'none';
+  }
+  testEl.addEventListener('change', syncTestNotice);
+  syncTestNotice();
   function syncPerc() {
     var applies = jurEl.value === 'FL' && kindEl.value === 'contract_ratification';
     percNotice.style.display = applies ? '' : 'none';

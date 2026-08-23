@@ -22,6 +22,9 @@ const {
 const { smtpConfigured, sendCredentialEmail, sendVerificationEmail } = require('../mailer');
 const { checkEmailSyntax } = require('../email-syntax');
 const { buildArchive, writeSealedArchive } = require('../archives');
+const {
+  electionSkipsEmailVerify, markTestElectionBanner, demoSkipForCreate,
+} = require('../election-demo');
 
 const BASE_URL = () => process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
@@ -81,6 +84,31 @@ function getElection(id) {
   e.races = db.prepare('SELECT * FROM races WHERE election_id=? ORDER BY position, id').all(e.id);
   for (const r of e.races) r.candidates = db.prepare('SELECT * FROM candidates WHERE race_id=? ORDER BY position, id').all(r.id);
   return e;
+}
+
+/**
+ * Split the good-standing roster into electronic vs paper for credential
+ * issuance. Binding elections require email_verified=1. A TEST election with
+ * demo_skip_email_verify=1 accepts syntactically valid emails even when
+ * unverified. Paper (flagged, or no email) is unchanged either way.
+ */
+function listCredentialPaths(election) {
+  const skipVerify = electionSkipsEmailVerify(election);
+  const paper = db.prepare("SELECT * FROM members WHERE good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='') ORDER BY name").all();
+  const withEmail = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email!='' ORDER BY name").all();
+  const electronic = [];
+  const unverified = [];
+  const invalidSyntax = [];
+  for (const m of withEmail) {
+    const check = checkEmailSyntax(m.email);
+    if (!check.ok) {
+      invalidSyntax.push(m);
+      continue;
+    }
+    if (skipVerify || Number(m.email_verified) === 1) electronic.push(m);
+    else unverified.push(m);
+  }
+  return { paper, electronic, unverified, invalidSyntax, skipVerify };
 }
 
 module.exports = function adminRoutes({ flash }) {
@@ -266,6 +294,8 @@ module.exports = function adminRoutes({ flash }) {
   router.post('/elections/new', (req, res) => {
     const { title, kind, opens_at, closes_at, notice_sent_on } = req.body;
     const isTest = req.body.is_test === '1' ? 1 : 0;
+    /* Binding votes can never store the bypass, even if the form posts it. */
+    const demoSkip = demoSkipForCreate({ isTest, posted: req.body.demo_skip_email_verify });
 
     /* Jurisdiction is required so jurisdiction-specific legal gates can run. */
     const jurisdiction = String(req.body.jurisdiction || '').trim().toUpperCase();
@@ -324,9 +354,9 @@ module.exports = function adminRoutes({ flash }) {
     let electionId;
     db.transaction(() => {
       const info = db.prepare(`INSERT INTO elections
-        (title, kind, jurisdiction, perc_variance_ack, perc_variance_ref, iaff_legal_approval, is_test, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(title.trim(), kind, jurisdiction, percAck, percRef || null, approvalRef || null, isTest, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
+        (title, kind, jurisdiction, perc_variance_ack, perc_variance_ref, iaff_legal_approval, is_test, demo_skip_email_verify, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(title.trim(), kind, jurisdiction, percAck, percRef || null, approvalRef || null, isTest, demoSkip, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
           keys.publicKey, sharesTotal, threshold, JSON.stringify(keyholders));
       electionId = info.lastInsertRowid;
       for (let i = 0; i < raceTitles.length; i++) {
@@ -339,9 +369,10 @@ module.exports = function adminRoutes({ flash }) {
     })();
 
     audit(req.session.user.username, 'election.created',
-      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${approvalRef ? `; IAFF Legal Dept approval recorded: ${approvalRef}` : ''}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''} — not verified by this system` : ''}`);
+      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${approvalRef ? `; IAFF Legal Dept approval recorded: ${approvalRef}` : ''}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''} — not verified by this system` : ''}${demoSkip ? '; DEMO skip-email-verify ON (TEST dry-run)' : ''}`);
 
     /* Shares are displayed exactly once and never stored. */
+    if (isTest) markTestElectionBanner(res, { is_test: 1 });
     res.render('admin/shares-once', {
       title: 'Key ceremony — distribute these shares now',
       electionId, shares: keys.shares, threshold, keyholders,
@@ -359,10 +390,15 @@ module.exports = function adminRoutes({ flash }) {
       const m = db.prepare('SELECT id, name FROM members WHERE id=?').get(s.member_id);
       return { member_id: s.member_id, name: m ? m.name : `member #${s.member_id}`, method: s.method };
     });
-    const paperMembers = db.prepare("SELECT * FROM members WHERE good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='')").all();
-    /* Members headed for the electronic path whose email is still unverified:
-     * issuance is blocked while any of these remain. */
-    const unverifiedMembers = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email!='' AND email_verified=0 ORDER BY name").all();
+    const paths = listCredentialPaths(e);
+    const paperMembers = paths.paper;
+    /* Members who would block issuance (unverified on a vote that still
+     * requires magic-link confirm). Empty when TEST + demo_skip is on. */
+    const unverifiedMembers = paths.unverified;
+    const demoUnverifiedMembers = paths.skipVerify
+      ? paths.electronic.filter((m) => Number(m.email_verified) !== 1)
+      : [];
+    markTestElectionBanner(res, e);
     /* Reissue-map state: is the encrypted member<->credential map still present,
      * or has it already been purged? Drives the post-close purge control. */
     const rm = db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN member_ref<>'' THEN 1 ELSE 0 END) AS present FROM credentials WHERE election_id=?").get(e.id);
@@ -370,9 +406,30 @@ module.exports = function adminRoutes({ flash }) {
     const reissueMapPurged = rm.total > 0 && (rm.present || 0) === 0;
     res.render('admin/election-detail', {
       title: e.title, e, credStats, ballotCount, turnout, eligibleCount: eligible.length, eligibleMembers,
-      paperMembers, unverifiedMembers, smtp: smtpConfigured(), reissueMapPresent, reissueMapPurged,
+      paperMembers, unverifiedMembers, demoUnverifiedMembers, skipEmailVerify: paths.skipVerify,
+      smtp: smtpConfigured(), reissueMapPresent, reissueMapPurged,
       results: e.results_json ? JSON.parse(e.results_json) : null,
     });
+  });
+
+  /* ---------------- DEMO skip-email-verify toggle (TEST elections only) ---- */
+  router.post('/elections/:id/demo-skip-email-verify', (req, res) => {
+    const e = getElection(req.params.id);
+    if (!e.is_test) {
+      audit(req.session.user.username, 'election.demo_skip_blocked',
+        `Election #${e.id} "${e.title}": refused to set demo_skip_email_verify — binding elections must require magic-link email verification`);
+      flash(req, 'error', 'DEMO email-verify skip can only be set on TEST elections. Binding elections always require magic-link email verification.');
+      return res.redirect(`/admin/elections/${e.id}`);
+    }
+    const next = req.body.demo_skip_email_verify === '1' ? 1 : 0;
+    /* AND is_test=1 is defense in depth: a binding row can never store a 1. */
+    db.prepare('UPDATE elections SET demo_skip_email_verify=? WHERE id=? AND is_test=1').run(next, e.id);
+    audit(req.session.user.username, 'election.demo_skip_email_verify',
+      `Election #${e.id} "${e.title}": demo_skip_email_verify set to ${next} (TEST dry-run ${next ? 'ON — unverified syntactically-valid emails eligible for electronic credentials' : 'OFF — magic-link verification required'})`);
+    flash(req, 'ok', next
+      ? 'DEMO skip-email-verify is ON for this TEST election. Electronic credentials can be issued to syntactically valid addresses without a magic-link confirm.'
+      : 'DEMO skip-email-verify is OFF. This TEST election now requires email verification before electronic credentials, same as a binding vote.');
+    res.redirect(`/admin/elections/${e.id}`);
   });
 
   /* ---------------- issue credentials ---------------- */
@@ -388,15 +445,27 @@ module.exports = function adminRoutes({ flash }) {
       }
 
       /*
-       * EMAIL VERIFICATION GATE: electronic credentials go only to VERIFIED
-       * addresses. Members on the paper path (flagged, or no email) are
-       * unaffected — no verification is required to receive a paper ballot.
-       * If anyone is headed for the electronic path with an unverified email,
-       * refuse to issue rather than silently dropping them from both paths.
+       * EMAIL VERIFICATION GATE: on a binding election, electronic credentials
+       * go only to VERIFIED addresses. A TEST election with
+       * demo_skip_email_verify=1 may issue to syntactically valid emails even
+       * when email_verified=0 (dry-run without SMTP / magic-link). Binding
+       * votes never take that path. Paper (flagged, or no email) is unchanged
+       * — no verification is required to receive a paper ballot. If anyone is
+       * headed for the electronic path but cannot be issued (unverified on a
+       * gated vote, or an address that fails syntax), refuse rather than
+       * silently dropping them from both paths.
        */
-      const electronic = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email != '' AND email_verified=1 ORDER BY name").all();
-      const paper = db.prepare("SELECT * FROM members WHERE good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='') ORDER BY name").all();
-      const unverified = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email!='' AND email_verified=0 ORDER BY name").all();
+      const { electronic, paper, unverified, invalidSyntax, skipVerify } = listCredentialPaths(e);
+      if (invalidSyntax.length > 0) {
+        audit(req.session.user.username, 'election.credential_issue_blocked_email_syntax',
+          `Election #${e.id}: credential issuance blocked — ${invalidSyntax.length} member(s) on the electronic path have an address that fails syntax validation`);
+        const names = invalidSyntax.slice(0, 5).map((m) => m.name).join(', ');
+        flash(req, 'error',
+          `Cannot issue electronic credentials: ${invalidSyntax.length} member(s) have an email that is not syntactically valid `
+          + `(${names}${invalidSyntax.length > 5 ? ', …' : ''}). `
+          + 'Fix the address on the roster page, or flag them for a paper ballot.');
+        return res.redirect(`/admin/elections/${e.id}`);
+      }
       if (unverified.length > 0) {
         audit(req.session.user.username, 'election.credential_issue_blocked_unverified',
           `Election #${e.id}: credential issuance blocked — ${unverified.length} member(s) on the electronic path have unverified email addresses`);
@@ -429,7 +498,7 @@ module.exports = function adminRoutes({ flash }) {
       })();
 
       audit(req.session.user.username, 'election.credentials_issued',
-        `Election #${e.id}: ${issued.length} electronic credentials generated (random, hashed at rest); ${paper.length} member(s) flagged for the alternative paper-ballot method`);
+        `Election #${e.id}: ${issued.length} electronic credentials generated (random, hashed at rest); ${paper.length} member(s) flagged for the alternative paper-ballot method${skipVerify ? '; DEMO skip-email-verify ON (unverified syntactically-valid emails included)' : ''}`);
 
       /* Deliver */
       const voteUrl = (process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`) + '/';
@@ -442,10 +511,12 @@ module.exports = function adminRoutes({ flash }) {
           } catch (err) { failures.push(`${member.name} <${member.email}>: ${err.message}`); }
         }
         audit(req.session.user.username, 'election.credentials_emailed', `Election #${e.id}: ${sent} credential emails sent, ${failures.length} failed`);
+        markTestElectionBanner(res, e);
         res.render('admin/credentials-sent', { title: 'Credentials emailed', e, sent, failures, paper });
       } else {
         /* One-time export for mail-merge; shown once, never retrievable again. */
         audit(req.session.user.username, 'election.credentials_exported', `Election #${e.id}: one-time credential export displayed for mail-merge delivery`);
+        markTestElectionBanner(res, e);
         res.render('admin/credentials-export', { title: 'One-time credential export', e, issued, paper, voteUrl });
       }
     } catch (err) { next(err); }
@@ -475,12 +546,16 @@ module.exports = function adminRoutes({ flash }) {
 
       const voteUrl = (process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`) + '/';
       /* Email delivery only to a still-verified address (it may have been
-       * changed since issuance); otherwise fall back to the one-time display. */
-      if (smtpConfigured() && member.email && member.email_verified) {
+       * changed since issuance), or to a syntactically valid address on a
+       * TEST election with demo_skip_email_verify. Otherwise the one-time display. */
+      const emailOk = !!(member.email && checkEmailSyntax(member.email).ok);
+      const canEmailCred = smtpConfigured() && emailOk && (member.email_verified || electionSkipsEmailVerify(e));
+      if (canEmailCred) {
         await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at });
         flash(req, 'ok', `A replacement credential was emailed to ${member.name}. The previous credential no longer works.`);
         res.redirect(`/admin/elections/${e.id}`);
       } else {
+        markTestElectionBanner(res, e);
         res.render('admin/credentials-export', { title: 'Replacement credential (shown once)', e, issued: [{ member, credential }], paper: [], voteUrl });
       }
     } catch (err) { next(err); }
@@ -556,6 +631,7 @@ module.exports = function adminRoutes({ flash }) {
   router.get('/elections/:id/tally', (req, res) => {
     const e = getElection(req.params.id);
     if (e.status !== 'closed') { flash(req, 'error', 'Close the vote before tallying.'); return res.redirect(`/admin/elections/${e.id}`); }
+    markTestElectionBanner(res, e);
     res.render('admin/tally', { title: 'Tally ceremony', e });
   });
 

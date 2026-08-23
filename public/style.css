@@ -79,6 +79,8 @@ main { max-width: 880px; margin: 0 auto; padding: 28px 20px 80px; }
   letter-spacing: .14em; text-transform: uppercase; font-size: 12px;
   margin-right: 8px; color: #fff;
 }
+/* Election-scoped TEST banner (not the instance-wide DEMO=1 bar). */
+.demobar.election-testbar { background: var(--brick); color: #fff; }
 
 /* top chrome — light, like letterhead rather than an app header. The head rule
    is the heavy ink line you find at the top of a printed ballot. */

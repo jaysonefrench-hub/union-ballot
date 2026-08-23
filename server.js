@@ -106,6 +106,8 @@ app.use((req, res, next) => {
   res.locals.user = req.session.user || null;
   res.locals.flash = req.session.flash || null;
   res.locals.brand = BRAND;
+  /* Set true only on pages that belong to a TEST election — never globally. */
+  res.locals.electionIsTest = false;
   /* Deployed-code transparency: observers can compare this to an independent
      build of the published source, and the commit to the public repository. */
   res.locals.source = { hash: SOURCE_HASH, fileCount: SOURCE_FILE_COUNT, commit: GIT_COMMIT, repoUrl: REPO_URL };

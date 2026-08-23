@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS users (
  * on the paper-ballot path never needs a verified email. The verification
  * token is stored only as a SHA-256 hash (the plaintext exists only in the
  * verification email / one-time link screen), is single-use, and expires.
+ * TEST elections may set demo_skip_email_verify to skip this gate; binding
+ * elections never do.
  */
 CREATE TABLE IF NOT EXISTS members (
   id INTEGER PRIMARY KEY,
@@ -113,6 +115,15 @@ CREATE TABLE IF NOT EXISTS elections (
   perc_variance_ref TEXT,     -- optional date/reference for that claimed variance, kept for the record
   iaff_legal_approval TEXT,   -- for secret-ballot kinds: recorded acknowledgment/reference of IAFF Legal Dept approval (per IAFF Best Practices & Model Rules)
   is_test INTEGER NOT NULL DEFAULT 0,
+  /*
+   * DEMO / TEST dry-run: when is_test=1 AND this flag is 1, electronic
+   * credentials may be issued to syntactically valid emails without
+   * magic-link verification. Binding elections (is_test=0) must never
+   * store or honor a 1 here — application code forces 0 on create/update.
+   * Default 0 so a live upgrade of an existing TEST row stays gated until
+   * the committee flips the toggle (new TEST creates set 1 in the INSERT).
+   */
+  demo_skip_email_verify INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','credentials_issued','open','closed','tallied')),
   notice_sent_on TEXT,
   opens_at TEXT,
@@ -246,6 +257,7 @@ ensureColumn('members', 'email_verify_sent_at', 'email_verify_sent_at TEXT');
 ensureColumn('elections', 'jurisdiction', 'jurisdiction TEXT');
 ensureColumn('elections', 'perc_variance_ack', 'perc_variance_ack INTEGER NOT NULL DEFAULT 0');
 ensureColumn('elections', 'perc_variance_ref', 'perc_variance_ref TEXT');
+ensureColumn('elections', 'demo_skip_email_verify', 'demo_skip_email_verify INTEGER NOT NULL DEFAULT 0');
 ensureColumn('users', 'email', 'email TEXT');
 ensureColumn('users', 'reset_token_hash', 'reset_token_hash TEXT');
 ensureColumn('users', 'reset_token_sent_at', 'reset_token_sent_at TEXT');
