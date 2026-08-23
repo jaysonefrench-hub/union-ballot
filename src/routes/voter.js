@@ -6,6 +6,7 @@
 
 const express = require('express');
 const { db, audit, getReissueKey } = require('../db');
+const { markTestElectionBanner } = require('../election-demo');
 const {
   normalizeCredential, hashCredential, encryptBallot, aesDecrypt, randomId,
   hashVerifyToken,
@@ -136,6 +137,7 @@ module.exports = function voterRoutes({ flash }) {
       return res.redirect('/');
     }
     const { election, races } = loadBallotDef(cred.election_id);
+    markTestElectionBanner(res, election);
     res.render('ballot', {
       title: election.title,
       election, races,
@@ -197,6 +199,7 @@ module.exports = function voterRoutes({ flash }) {
 
       const turnout = db.prepare('SELECT COUNT(*) AS n FROM turnout WHERE election_id=?').get(election.id).n;
       const eligible = JSON.parse(election.eligibility_snapshot || '[]').length;
+      markTestElectionBanner(res, election);
       res.render('cast-confirm', { title: 'Ballot cast', election, turnout, eligible });
     } catch (err) {
       next(err);

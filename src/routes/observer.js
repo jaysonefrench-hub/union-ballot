@@ -11,6 +11,7 @@
 
 const express = require('express');
 const { db, verifyAuditChain } = require('../db');
+const { markTestElectionBanner } = require('../election-demo');
 
 module.exports = function observerRoutes() {
   const router = express.Router();
@@ -34,6 +35,7 @@ module.exports = function observerRoutes() {
     const turnout = db.prepare('SELECT m.name, t.voted_on, t.method FROM turnout t JOIN members m ON m.id=t.member_id WHERE t.election_id=? ORDER BY m.name').all(e.id);
     const credStats = db.prepare('SELECT COUNT(*) AS total, COALESCE(SUM(redeemed),0) AS used, COALESCE(SUM(voided),0) AS voided FROM credentials WHERE election_id=?').get(e.id);
     const ballots = db.prepare('SELECT COUNT(*) AS n FROM ballots WHERE election_id=?').get(e.id).n;
+    markTestElectionBanner(res, e);
     res.render('observer/election', {
       title: `Observing: ${e.title}`, e, turnout, credStats, ballots,
       eligible: JSON.parse(e.eligibility_snapshot || '[]').length,

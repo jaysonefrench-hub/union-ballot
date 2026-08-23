@@ -5,6 +5,7 @@
 <p>
   <span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span>
   <% if (e.is_test) { %><span class="tag test">Test</span><% } %>
+  <% if (e.is_test && e.demo_skip_email_verify) { %><span class="tag test">DEMO skip-email-verify</span><% } %>
   · Ballot key: <%= e.key_threshold %>-of-<%= e.key_shares_total %> shares
   <% if (e.jurisdiction) { %> · Jurisdiction: <%= e.jurisdiction %><% } %>
   <% if (e.perc_variance_ack) { %> · PERC variance claimed by committee<%= e.perc_variance_ref ? ' (' + e.perc_variance_ref + ')' : '' %> — not verified by this system<% } %>
@@ -21,6 +22,25 @@
   <div class="stat"><div class="n"><%= ballotCount %></div><div class="l">Sealed ballots</div></div>
 </div>
 
+<% if (e.is_test) { %>
+  <h2>DEMO / TEST settings</h2>
+  <p class="sub">This vote is not binding. Skip-email-verify lets the committee dry-run credential issuance
+  without SMTP or magic-link confirms. Binding elections can never set or honor this flag.</p>
+  <form method="post" action="/admin/elections/<%= e.id %>/demo-skip-email-verify">
+    <% if (e.demo_skip_email_verify) { %>
+      <input type="hidden" name="demo_skip_email_verify" value="0">
+      <p><strong>Skip email verification is ON.</strong> Members with a syntactically valid email can receive
+      electronic credentials even if they have not confirmed the address.</p>
+      <button class="btn" type="submit">Require email verification on this TEST election</button>
+    <% } else { %>
+      <input type="hidden" name="demo_skip_email_verify" value="1">
+      <p><strong>Skip email verification is OFF.</strong> Electronic credentials require a magic-link confirm,
+      the same as a binding vote.</p>
+      <button class="btn" type="submit">Skip email verification (DEMO dry-run)</button>
+    <% } %>
+  </form>
+<% } %>
+
 <% if (e.status === 'draft') { %>
   <h2>1 · Issue credentials</h2>
   <p>Eligibility is frozen from the roster at this moment. Random credentials are generated, stored only as hashes, and
@@ -33,6 +53,14 @@
     On the <a href="/admin/members">roster page</a>, resend their verification links — or flag them for a
     paper ballot, which requires no email verification.
     <ul style="margin:8px 0 0"><% unverifiedMembers.forEach(function (m) { %><li><%= m.name %> — <span class="mono"><%= m.email %></span></li><% }) %></ul>
+  </div>
+  <% } else if (typeof demoUnverifiedMembers !== 'undefined' && demoUnverifiedMembers.length) { %>
+  <div class="notice seal">
+    <strong>DEMO / TEST — skip email verification is on.</strong>
+    <%= demoUnverifiedMembers.length %> member(s) have not confirmed their email; they remain eligible for
+    electronic credentials because this is a test election with the dry-run flag enabled. Addresses still
+    had to pass roster syntax validation.
+    <ul style="margin:8px 0 0"><% demoUnverifiedMembers.forEach(function (m) { %><li><%= m.name %> — <span class="mono"><%= m.email %></span> (unverified)</li><% }) %></ul>
   </div>
   <% } %>
   <form method="post" action="/admin/elections/<%= e.id %>/issue-credentials">

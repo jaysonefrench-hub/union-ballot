@@ -5,7 +5,9 @@
  * majority/runoff math → anonymity properties of stored data → roster-import
  * email-syntax gate (report of rejected rows) → member-edit email gate →
  * automatic sealed archive at tally → platform-owner page (key gate, counts
- * only, archive download) → committee password reset (hash-only tokens).
+ * only, archive download) → committee password reset (hash-only tokens) →
+ * DEMO/TEST skip-email-verify (binding still gated; TEST+demo allows
+ * unverified syntactically-valid emails; PERC FL binding still blocked).
  */
 'use strict';
 const crypto = require('crypto');
@@ -277,10 +279,14 @@ function decryptSealed(buf, keyHex) {
     const flVar = db.prepare('SELECT * FROM elections ORDER BY id DESC LIMIT 1').get();
     assert.strictEqual(flVar.perc_variance_ack, 1, 'variance acknowledgment stored on the election');
     assert.strictEqual(flVar.perc_variance_ref, 'PERC variance order 2026-03-15', 'variance reference stored');
+    assert.strictEqual(flVar.demo_skip_email_verify, 0, 'binding FL ratification never stores demo skip-email-verify');
 
     /* 13c. FL TEST-election ratification → allowed without a variance */
     await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL TA Ratification (test run)', kind: 'contract_ratification', jurisdiction: 'FL', is_test: '1' });
     assert.strictEqual(electionCount(), n0 + 2, 'FL ratification test election allowed without variance');
+    const flTest = db.prepare("SELECT * FROM elections WHERE title=?").get('FL TA Ratification (test run)');
+    assert.strictEqual(flTest.is_test, 1);
+    assert.strictEqual(flTest.demo_skip_email_verify, 1, 'new TEST elections default demo_skip_email_verify ON');
 
     /* 13d. FL NON-ratification votes are NOT blocked (bylaws, officer election) */
     await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL Bylaw Amendment', kind: 'bylaw_amendment', jurisdiction: 'FL' });
@@ -444,6 +450,87 @@ function decryptSealed(buf, keyHex) {
     r = await req('POST', '/login', { username: 'chair', password: 'new-committee-pass-9' });
     assert.strictEqual(r.location, '/admin', 'new password signs in');
 
+    /* 20. DEMO / TEST skip-email-verify — election-level, never a global env.
+     * Binding still blocks unverified; TEST+demo allows unverified
+     * syntactically-valid emails; a TEST with the flag off stays gated;
+     * binding FL PERC ratification is still blocked. */
+    const dryRun = {
+      race_title: 'Practice question', race_seats: '1',
+      race_threshold: 'majority', race_candidates: 'Yes\nNo',
+      key_shares_total: '3', key_threshold: '2', keyholders: '',
+    };
+    assert.strictEqual(db.prepare('SELECT demo_skip_email_verify FROM elections WHERE id=?').get(eid).demo_skip_email_verify, 0,
+      'binding officer election never stored demo_skip_email_verify');
+    r = await req('GET', `/admin/elections/${eid}`);
+    assert.ok(!r.text.includes('DEMO / TEST'),
+      'binding election detail does not show the DEMO / TEST banner');
+    await req('POST', `/admin/elections/${eid}/demo-skip-email-verify`, { demo_skip_email_verify: '1' });
+    assert.strictEqual(db.prepare('SELECT demo_skip_email_verify FROM elections WHERE id=?').get(eid).demo_skip_email_verify, 0,
+      'toggle refused on a binding election');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='election.demo_skip_blocked'").get().n >= 1,
+      'refused binding demo-skip toggle is audited');
+
+    r = await req('GET', '/admin/elections/new');
+    assert.ok(r.text.includes('DEMO / TEST dry-run'), 'create form explains TEST skip-email-verify');
+    assert.ok(r.text.includes('not a binding election'), 'create form says TEST is not binding');
+
+    /* Binding create that tries to post the bypass still stores 0. */
+    await req('POST', '/admin/elections/new', { ...dryRun, title: 'Binding cannot skip verify', kind: 'other', jurisdiction: 'OH', demo_skip_email_verify: '1' });
+    const bindNoSkip = db.prepare("SELECT * FROM elections WHERE title=?").get('Binding cannot skip verify');
+    assert.ok(bindNoSkip, 'binding other-kind election created');
+    assert.strictEqual(bindNoSkip.is_test, 0);
+    assert.strictEqual(bindNoSkip.demo_skip_email_verify, 0, 'posted demo_skip on a binding create is ignored');
+
+    /* Reset verification so the remaining gates run against unverified emails. */
+    db.prepare("UPDATE members SET email_verified=0 WHERE email IS NOT NULL AND email!=''").run();
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM members WHERE email IS NOT NULL AND email!='' AND email_verified=0").get().n >= 6,
+      'electronic-path members are unverified for the DEMO dry-run checks');
+
+    /* Binding still blocks unverified after the reset. */
+    r = await req('POST', `/admin/elections/${bindNoSkip.id}/issue-credentials`, {});
+    assert.strictEqual(db.prepare('SELECT status FROM elections WHERE id=?').get(bindNoSkip.id).status, 'draft',
+      'binding still blocks unverified emails for credentials');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM credentials WHERE election_id=?').get(bindNoSkip.id).n, 0,
+      'binding issued no credentials to unverified members');
+
+    /* New TEST election defaults the bypass ON and issues to unverified, syntax-valid emails. */
+    await req('POST', '/admin/elections/new', { ...dryRun, title: 'DEMO dry-run vote', kind: 'other', jurisdiction: 'OH', is_test: '1' });
+    const demoEid = db.prepare("SELECT * FROM elections WHERE title=?").get('DEMO dry-run vote');
+    assert.strictEqual(demoEid.is_test, 1);
+    assert.strictEqual(demoEid.demo_skip_email_verify, 1, 'new TEST election defaults demo_skip_email_verify ON');
+    r = await req('GET', `/admin/elections/${demoEid.id}`);
+    assert.ok(r.text.includes('DEMO / TEST'), 'TEST election page shows DEMO / TEST banner');
+    assert.ok(r.text.includes('not a binding election'), 'TEST banner says not a binding election');
+    assert.ok(r.text.includes('Skip email verification is ON') || r.text.includes('skip email verification is on'),
+      'election detail shows the DEMO skip toggle state');
+    r = await req('POST', `/admin/elections/${demoEid.id}/issue-credentials`, {});
+    const demoCreds = [...r.text.matchAll(/[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}/g)].map((m) => m[0]);
+    assert.ok(demoCreds.length >= 6, 'TEST+demo issued electronic credentials to unverified syntactically-valid emails');
+    assert.strictEqual(db.prepare('SELECT status FROM elections WHERE id=?').get(demoEid.id).status, 'credentials_issued',
+      'TEST+demo credential issuance succeeded');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='election.credentials_issued' AND detail LIKE '%DEMO skip-email-verify ON%'").get().n >= 1,
+      'TEST+demo credential issuance is audited as a dry-run');
+
+    /* Existing TEST election can flip the flag off (audit-logged) and then the gate returns. */
+    await req('POST', '/admin/elections/new', { ...dryRun, title: 'TEST verify still required', kind: 'other', jurisdiction: 'OH', is_test: '1' });
+    const demoOff = db.prepare("SELECT * FROM elections WHERE title=?").get('TEST verify still required');
+    assert.strictEqual(demoOff.demo_skip_email_verify, 1, 'second TEST also defaults skip ON');
+    await req('POST', `/admin/elections/${demoOff.id}/demo-skip-email-verify`, { demo_skip_email_verify: '0' });
+    assert.strictEqual(db.prepare('SELECT demo_skip_email_verify FROM elections WHERE id=?').get(demoOff.id).demo_skip_email_verify, 0,
+      'admin toggle turns demo_skip off on a TEST election');
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='election.demo_skip_email_verify'").get().n >= 1,
+      'TEST demo-skip toggle is audited');
+    r = await req('POST', `/admin/elections/${demoOff.id}/issue-credentials`, {});
+    assert.strictEqual(db.prepare('SELECT status FROM elections WHERE id=?').get(demoOff.id).status, 'draft',
+      'TEST with demo_skip OFF still blocks unverified emails');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM credentials WHERE election_id=?').get(demoOff.id).n, 0,
+      'TEST with demo_skip OFF issued no credentials');
+
+    /* PERC FL binding ratification is still a hard stop (unchanged by DEMO). */
+    const nPerc = electionCount();
+    await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL TA Ratification (still blocked)', kind: 'contract_ratification', jurisdiction: 'FL' });
+    assert.strictEqual(electionCount(), nPerc, 'PERC FL binding ratification still blocked without variance ack');
+
     console.log('\nALL SMOKE TESTS PASSED ✔');
     console.log(`  Election #${eid}: 6 ballots, Smith elected (majority), dues adopted (2/3).`);
     console.log('  Verified: approval gate, one-time shares, hashed credentials, unlinkable ballots,');
@@ -456,6 +543,9 @@ function decryptSealed(buf, keyHex) {
     console.log('  no credential plaintext), platform page gated by PLATFORM_OWNER_KEY only (committee');
     console.log('  session refused, counts-only stats, no PII, archive download), and password recovery');
     console.log('  (hash-only single-use expiring tokens, platform one-time link, old password dies).');
+    console.log('  Verified: DEMO/TEST skip-email-verify is election-scoped (new TEST defaults ON,');
+    console.log('  binding can never set or honor it, toggle is audited, unverified syntax-valid');
+    console.log('  emails get credentials only on TEST+demo, PERC FL binding still blocked).');
   } finally {
     server.close();
     fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
