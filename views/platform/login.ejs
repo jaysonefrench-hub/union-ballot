@@ -1,15 +1,20 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Platform owner</p>
-<h1>Platform access</h1>
-<p class="sub">This page is for the operator who hosts this instance — not the election committee
-and not observers. A committee sign-in does not open it; only the platform owner key does.</p>
+<p class="eyebrow">Platform administration</p>
+<h1>Platform sign-in</h1>
+<p class="sub">This page is for the operator who hosts this instance for union locals — not any
+local's election committee and not observers. A committee sign-in does not open it; only a
+platform administrator account does. Platform administrators see aggregate counts and create
+locals; they can never read a ballot or any local's member roster.</p>
 <form method="post" action="/platform/auth" style="max-width:420px">
-  <label for="k">Platform owner key</label>
-  <input id="k" type="password" name="key" required autocomplete="off">
-  <button class="btn primary" type="submit">Open platform page</button>
+  <label for="pu">Username</label>
+  <input id="pu" type="text" name="username" required autocomplete="username">
+  <label for="pp">Password</label>
+  <input id="pp" type="password" name="password" required autocomplete="current-password">
+  <button class="btn primary" type="submit">Sign in</button>
 </form>
-<p class="sub" style="margin-top:18px">The key is set by the <span class="mono">PLATFORM_OWNER_KEY</span>
-environment variable and is never stored by this application. Committee members looking for their
-elections should <a href="/login">sign in here</a> instead.</p>
+<p class="sub" style="margin-top:18px">Committee members looking for their local's elections
+should <a href="/login">sign in here</a> instead. Lost all platform passwords? The operator can
+rotate <span class="mono">PLATFORM_OWNER_KEY</span> on the server and create a replacement
+account at <a href="/platform/setup">/platform/setup</a>.</p>
 <%- include('../partials/foot') %>

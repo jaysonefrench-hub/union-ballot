@@ -21,7 +21,10 @@
     <img class="brand-logo" src="<%= brand.logo %>" alt="<%= brand.org %> logo">
     <span class="brand-text">
       <span class="brand-org"><%= brand.org %></span>
-      <span class="brand-sub"><% if (brand.local) { %><%= brand.local %> · <% } %><%= brand.system %></span>
+      <%# Signed-in committee/observer pages name THE local being managed —
+          the same person may hold accounts at more than one local, so every
+          page must be unambiguous about whose roster and votes these are. %>
+      <span class="brand-sub"><% if (currentLocal) { %><strong><%= currentLocal.name %></strong> · <% } else if (brand.local) { %><%= brand.local %> · <% } %><%= brand.system %></span>
     </span>
   </a>
   <nav>
@@ -33,12 +36,17 @@
     <% } else if (user && user.role === 'observer') { %>
       <a href="/observe">Observer station</a>
       <a href="/observe/audit">Audit log</a>
+    <% } else if (platformAdmin) { %>
+      <a href="/platform">Platform</a>
     <% } %>
   </nav>
   <div class="who">
     <% if (user) { %>
-      <span><%= user.name %> (<%= user.role %>)</span>
+      <span><%= user.name %> (<%= user.role %><% if (currentLocal) { %> — <%= currentLocal.name %><% } %>)</span>
       <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+    <% } else if (platformAdmin) { %>
+      <span><%= platformAdmin.name %> (platform administrator)</span>
+      <form method="post" action="/platform/logout"><button type="submit">Sign out</button></form>
     <% } else { %>
       <a href="/login">Committee sign-in</a>
     <% } %>

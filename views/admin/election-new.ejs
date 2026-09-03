@@ -26,7 +26,7 @@
       <select id="jurisdiction" name="jurisdiction" required>
         <option value="">— select —</option>
         <% jurisdictions.forEach(function (j) { %>
-          <option value="<%= j[0] %>"><%= j[1] %></option>
+          <option value="<%= j[0] %>" <%= j[0] === defaultJurisdiction ? 'selected' : '' %>><%= j[1] %></option>
         <% }) %>
       </select>
     </div>

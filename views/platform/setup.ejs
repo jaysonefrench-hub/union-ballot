@@ -1,0 +1,40 @@
+<%- include('../partials/head') %>
+<div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<p class="eyebrow">Platform administration — <%= adminExists ? 'account recovery' : 'first run' %></p>
+<h1>Create a platform administrator</h1>
+<p class="sub">The platform administrator hosts this instance for union locals: it sees aggregate,
+no-PII counts per local, creates new locals (each with its first committee account), and holds the
+recovery powers (archives, reset links, encrypted backups). It can <strong>never</strong> read a
+ballot — ballots are sealed to keyholder shares that are never stored — and no platform page shows
+any member's name, email, or phone number.</p>
+
+<% if (!allowed.ok) { %>
+<div class="notice warn">
+  <strong>Setup is locked.</strong> <%= allowed.reason %>
+</div>
+<% } else { %>
+<% if (adminExists) { %>
+<div class="notice warn">
+  <strong>A platform administrator already exists.</strong> This form adds another account —
+  use it only for recovery (all platform passwords lost) or to add a second operator. The
+  creation is recorded in the tamper-evident platform audit log.
+</div>
+<% } %>
+<form method="post" action="/platform/setup" style="max-width:460px">
+  <% if (allowed.keyRequired) { %>
+  <label for="k">Platform owner key (<span class="mono">PLATFORM_OWNER_KEY</span> from the server environment)</label>
+  <input id="k" type="password" name="key" required autocomplete="off">
+  <p class="sub">The key authorizes this one-time setup. It is compared in constant time and never
+  stored, logged, or audited.</p>
+  <% } %>
+  <label for="dn">Name (e.g., "Platform operator")</label>
+  <input id="dn" type="text" name="display_name" required>
+  <label for="u">Username</label>
+  <input id="u" type="text" name="username" required autocomplete="username">
+  <label for="p">Password (10+ characters)</label>
+  <input id="p" type="password" name="password" minlength="10" required autocomplete="new-password">
+  <button class="btn primary" type="submit">Create platform administrator</button>
+</form>
+<% } %>
+<p class="sub" style="margin-top:18px">Already have a platform account? <a href="/platform">Sign in</a>.</p>
+<%- include('../partials/foot') %>

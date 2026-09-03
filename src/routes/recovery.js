@@ -13,8 +13,8 @@
  *      account has a recovery email on file, the link is emailed. The
  *      response is deliberately identical whether or not the account exists,
  *      so the public form cannot be used to enumerate usernames.
- *   2. Platform owner: with PLATFORM_OWNER_KEY, a one-time link can be
- *      generated on the /platform page and delivered out-of-band — the
+ *   2. Platform administrator: a signed-in platform admin can generate a
+ *      one-time link on the /platform page and deliver it out-of-band — the
  *      backstop for a local that lost its login on an instance without SMTP.
  *
  * Every request and completion is audit-logged; the token never is.
@@ -49,8 +49,9 @@ module.exports = function recoveryRoutes({ flash }) {
       }
       if (!smtpConfigured()) {
         /* Without SMTP there is nothing to send — say so plainly (this
-         * reveals nothing about any account) and point at the backstop. */
-        audit('system', 'auth.password_reset_requested',
+         * reveals nothing about any account) and point at the backstop.
+         * No account was identified, so this lands on the platform chain. */
+        audit(null, 'system', 'auth.password_reset_requested',
           'A password reset was requested but email delivery (SMTP) is not configured on this instance; nothing was sent');
         flash(req, 'error', 'Email delivery is not configured on this instance, so reset links cannot be emailed. Contact platform support to receive a one-time reset link.');
         return res.redirect('/forgot-password');
@@ -69,13 +70,14 @@ module.exports = function recoveryRoutes({ flash }) {
       if (!u) {
         /* Like failed sign-ins, the submitted name is deliberately NOT
          * recorded: a pasted credential or password must never land in the
-         * permanent, observer-visible audit log. */
-        audit('system', 'auth.password_reset_requested',
+         * permanent, observer-visible audit log. Unknown account = no local,
+         * so this entry belongs to the platform chain. */
+        audit(null, 'system', 'auth.password_reset_requested',
           'Password reset requested for an unknown account (submitted name not recorded); nothing was sent');
         return generic();
       }
       if (!u.email) {
-        audit('system', 'auth.password_reset_requested',
+        audit(u.local_id, 'system', 'auth.password_reset_requested',
           `Password reset requested for account "${u.username}", which has no recovery email on file; nothing was sent. An administrator can add one under Accounts, or platform support can issue a one-time link.`);
         return generic();
       }
@@ -83,7 +85,7 @@ module.exports = function recoveryRoutes({ flash }) {
       const resetUrl = beginPasswordReset(u.id);
       try {
         await sendPasswordResetEmail({ to: u.email, displayName: u.display_name, resetUrl, ttlMinutes: RESET_TOKEN_TTL_MINUTES });
-        audit('system', 'auth.password_reset_requested',
+        audit(u.local_id, 'system', 'auth.password_reset_requested',
           `Password reset link emailed for account "${u.username}" (single use; token not recorded; expires in ${RESET_TOKEN_TTL_MINUTES} minutes)`);
       } catch (err) {
         /* Failed to send → void the token so no live link exists that nobody
@@ -91,7 +93,7 @@ module.exports = function recoveryRoutes({ flash }) {
          * recipient address); the attempt itself is the loggable event. */
         clearResetToken(u.id);
         console.error('[recovery] reset email failed:', err.message);
-        audit('system', 'auth.password_reset_email_failed',
+        audit(u.local_id, 'system', 'auth.password_reset_email_failed',
           `Password reset email for account "${u.username}" could not be sent; the link was voided`);
       }
       return generic();
@@ -101,7 +103,9 @@ module.exports = function recoveryRoutes({ flash }) {
   /* ---------------- reset password (consume the link) ------------------ */
   function rejectToken(res, check) {
     if (check.reason !== 'format') {
-      audit('system', 'auth.password_reset_rejected', check.reason === 'expired'
+      /* An expired link still identifies its account (and local); an unknown
+       * token identifies nothing and goes to the platform chain. */
+      audit(check.user ? check.user.local_id : null, 'system', 'auth.password_reset_rejected', check.reason === 'expired'
         ? 'An expired password-reset link was opened (token not recorded)'
         : 'A password-reset link was opened that did not match any pending reset (token not recorded)');
     }
@@ -142,7 +146,7 @@ module.exports = function recoveryRoutes({ flash }) {
      * link is void and only the bcrypt hash of the NEW password exists. */
     db.prepare('UPDATE users SET password_hash=?, reset_token_hash=NULL, reset_token_sent_at=NULL WHERE id=?')
       .run(bcrypt.hashSync(password, 12), check.user.id);
-    audit('system', 'auth.password_reset_completed',
+    audit(check.user.local_id, 'system', 'auth.password_reset_completed',
       `Account "${check.user.username}" set a new password via a single-use reset link; the link is now void`);
     flash(req, 'ok', 'Your password has been changed. Sign in with your new password.');
     res.redirect('/login');

@@ -1,17 +1,36 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Tamper-evident log</p>
+<p class="eyebrow">Tamper-evident log — <%= currentLocal.name %></p>
 <h1>Audit log</h1>
 <div class="seal-strip">
   <strong>Chain verification:</strong>
-  <% if (chain.ok) { %>intact — every one of <%= chain.total %> entries hashes correctly against its predecessor.<% } else { %><span style="color:var(--signal)"><strong>BROKEN at entry #<%= chain.brokenAt %></strong> — the log has been altered.</span><% } %>
+  <% if (chain.ok) { %>intact — every one of <%= chain.total %> entries for this local hashes correctly against its predecessor.<% } else { %><span style="color:var(--signal)"><strong>BROKEN at entry #<%= chain.brokenAt %></strong> — the log has been altered.</span><% } %>
   <% if (chain.tip) { %><div class="tip">Chain tip: <%= chain.tip %></div><% } %>
 </div>
-<p class="sub">Ballot casting appears only as anonymous counter events — the log never records who cast which ballot or any ballot contents.</p>
+<p class="sub">This is <strong><%= currentLocal.name %></strong>'s own hash chain: every entry commits
+to the previous entry of this local, so the complete chain verifies without reference to any other
+local hosted on this platform. Ballot casting appears only as anonymous counter events — the log
+never records who cast which ballot or any ballot contents.</p>
 <table>
 <tr><th>#</th><th>When (UTC)</th><th>Actor</th><th>Event</th><th>Detail</th></tr>
 <% rows.forEach(function (r) { %>
 <tr><td><%= r.id %></td><td class="mono"><%= r.at %></td><td><%= r.actor %></td><td class="mono"><%= r.event %></td><td><%= r.detail || '' %></td></tr>
 <% }) %>
 </table>
+
+<h2>Instance-wide voter-portal security events</h2>
+<p class="sub">Rejected credentials and rate-limited addresses match <em>no</em> election, so they
+cannot be attributed to any one local — they are recorded on the platform's own chain and shown
+here (to every local's observers) so tamper-alert visibility is never lost. These events are
+anonymous by design: no name, address, or credential value is ever recorded.</p>
+<% if (securityEvents.length === 0) { %>
+  <div class="notice">None recorded.</div>
+<% } else { %>
+<table>
+<tr><th>When (UTC)</th><th>Event</th><th>Detail</th></tr>
+<% securityEvents.forEach(function (r) { %>
+<tr><td class="mono"><%= r.at %></td><td class="mono"><%= r.event %></td><td><%= r.detail || '' %></td></tr>
+<% }) %>
+</table>
+<% } %>
 <%- include('../partials/foot') %>
