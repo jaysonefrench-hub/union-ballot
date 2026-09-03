@@ -12,6 +12,31 @@
  * a mail provider they control and remind members to delete the email after
  * voting. This mirrors OLMS-reviewed vendor practice (credentials mailed or
  * emailed to members after eligibility is determined).
+ *
+ * MIME / LINK INTEGRITY
+ * ---------------------
+ * Nodemailer will quoted-printable-encode a text/plain part whenever the
+ * body is not 7-bit ASCII *or* any line is longer than 76 characters. Both
+ * are true of these messages: they contain typographic em-dashes, and a
+ * production verification URL (`https://vote.union-ballot.com/verify-email
+ * ?token=` + 32 hex chars, indented 4 spaces) is 85 characters.
+ *
+ * Quoted-printable then:
+ *   1. Escapes every literal `=` as `=3D`
+ *   2. Soft-wraps at 76 columns by inserting `=\r\n`
+ *
+ * The wire form of the link becomes `...?token=3D<first-20-hex>=\r\n<rest>`,
+ * which some clients (Gmail's autolinker in particular) surface as a
+ * missing or mangled `=` after `token`. The same shape affects password-
+ * reset links. Nodemailer's public `encoding: '7bit'` / `'8bit'` option
+ * does NOT prevent this: MimeNode.getTransferEncoding() treats any CTE
+ * other than `base64` / `quoted-printable` as unset and re-selects QP.
+ *
+ * The parts below are therefore emitted as raw `8bit` MIME (valid: bodies
+ * are UTF-8, longest line ≪ SMTP's 998-char limit) so the URL bytes are
+ * never escaped or wrapped. An HTML alternative with a real <a href>
+ * is sent alongside so a client that only follows anchors still gets an
+ * unwrapped link.
  */
 'use strict';
 
@@ -32,14 +57,46 @@ function transporter() {
   });
 }
 
-async function sendCredentialEmail({ to, memberName, electionTitle, credential, voteUrl, closesAt }) {
-  if (!smtpConfigured()) throw new Error('SMTP not configured');
-  const t = transporter();
-  await t.sendMail({
-    from: process.env.MAIL_FROM,
-    to,
-    subject: `Your secret-ballot voting credential — ${electionTitle}`,
-    text:
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Emit a textual MIME part with Content-Transfer-Encoding: 8bit, bypassing
+ * nodemailer's quoted-printable rewriter. See the file header.
+ */
+function eightBitPart(contentType, body) {
+  const crlf = String(body).replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+  return {
+    raw:
+      `Content-Type: ${contentType}; charset=utf-8\r\n` +
+      `Content-Transfer-Encoding: 8bit\r\n` +
+      `\r\n` +
+      crlf,
+  };
+}
+
+/** Same wording as the plain-text body, with each URL as a real <a href>. */
+function htmlAlternative(text, urls) {
+  let html = escapeHtml(text);
+  for (const url of urls) {
+    if (!url) continue;
+    const safe = escapeHtml(url);
+    html = html.split(safe).join(`<a href="${safe}">${safe}</a>`);
+  }
+  return `<!DOCTYPE html>\n<html><body>\n${html.replace(/\n/g, '<br>\n')}\n</body></html>\n`;
+}
+
+function mailFrom() {
+  return process.env.MAIL_FROM || 'noreply@localhost';
+}
+
+function buildCredentialEmail({ to, memberName, electionTitle, credential, voteUrl, closesAt }) {
+  const text =
 `${memberName},
 
 You are eligible to vote in: ${electionTitle}
@@ -58,23 +115,18 @@ Voting closes: ${closesAt || 'see election notice'}.
 Keep this credential private. It can be used only once. If you lose it, contact the election committee for a replacement (your old one will be voided).
 For ballot secrecy, delete this email after you vote.
 
-— Election Committee`,
-  });
+— Election Committee`;
+  return {
+    from: mailFrom(),
+    to,
+    subject: `Your secret-ballot voting credential — ${electionTitle}`,
+    text: eightBitPart('text/plain', text),
+    html: eightBitPart('text/html', htmlAlternative(text, [voteUrl])),
+  };
 }
 
-/**
- * Email-address verification before electronic credential delivery.
- * The link carries a single-use, high-entropy token; the system stores only
- * its hash. Members on the paper-ballot path never receive (or need) this.
- */
-async function sendVerificationEmail({ to, memberName, verifyUrl }) {
-  if (!smtpConfigured()) throw new Error('SMTP not configured');
-  const t = transporter();
-  await t.sendMail({
-    from: process.env.MAIL_FROM,
-    to,
-    subject: 'Confirm your email address for electronic voting',
-    text:
+function buildVerificationEmail({ to, memberName, verifyUrl }) {
+  const text =
 `${memberName},
 
 Your local's election committee added this email address to the voter roster
@@ -93,24 +145,18 @@ election committee. Members who do not confirm an email address are provided
 the alternative paper-ballot method instead; confirming is only required for
 electronic ballot delivery.
 
-— Election Committee`,
-  });
+— Election Committee`;
+  return {
+    from: mailFrom(),
+    to,
+    subject: 'Confirm your email address for electronic voting',
+    text: eightBitPart('text/plain', text),
+    html: eightBitPart('text/html', htmlAlternative(text, [verifyUrl])),
+  };
 }
 
-/**
- * Committee-account password reset. The link carries a single-use,
- * short-lived token; the system stores only its hash. The email NEVER
- * contains a password — old or new. The recipient chooses a new password on
- * the token page, so nothing recoverable ever transits or lands in a log.
- */
-async function sendPasswordResetEmail({ to, displayName, resetUrl, ttlMinutes }) {
-  if (!smtpConfigured()) throw new Error('SMTP not configured');
-  const t = transporter();
-  await t.sendMail({
-    from: process.env.MAIL_FROM,
-    to,
-    subject: 'Reset your election-committee account password',
-    text:
+function buildPasswordResetEmail({ to, displayName, resetUrl, ttlMinutes }) {
+  const text =
 `${displayName},
 
 A password reset was requested for your election-committee account.
@@ -127,8 +173,54 @@ If you did not request this, you can ignore this email: your current
 password still works and nothing has changed. The request has been recorded
 in the tamper-evident audit log either way.
 
-— Election system`,
-  });
+— Election system`;
+  return {
+    from: mailFrom(),
+    to,
+    subject: 'Reset your election-committee account password',
+    text: eightBitPart('text/plain', text),
+    html: eightBitPart('text/html', htmlAlternative(text, [resetUrl])),
+  };
 }
 
-module.exports = { smtpConfigured, sendCredentialEmail, sendVerificationEmail, sendPasswordResetEmail };
+/**
+ * Compose a message to its on-the-wire MIME form without sending.
+ * Used by the mailer regression test; also handy for local inspection.
+ */
+async function renderMail(mail) {
+  const t = nodemailer.createTransport({
+    streamTransport: true,
+    buffer: true,
+    newline: 'unix',
+  });
+  const info = await t.sendMail(mail);
+  return Buffer.isBuffer(info.message) ? info.message.toString('utf8') : String(info.message);
+}
+
+async function sendMail(mail) {
+  if (!smtpConfigured()) throw new Error('SMTP not configured');
+  await transporter().sendMail(mail);
+}
+
+async function sendCredentialEmail(opts) {
+  await sendMail(buildCredentialEmail(opts));
+}
+
+async function sendVerificationEmail(opts) {
+  await sendMail(buildVerificationEmail(opts));
+}
+
+async function sendPasswordResetEmail(opts) {
+  await sendMail(buildPasswordResetEmail(opts));
+}
+
+module.exports = {
+  smtpConfigured,
+  sendCredentialEmail,
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  buildCredentialEmail,
+  buildVerificationEmail,
+  buildPasswordResetEmail,
+  renderMail,
+};
