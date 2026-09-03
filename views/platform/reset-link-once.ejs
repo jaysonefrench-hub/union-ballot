@@ -6,7 +6,8 @@
   <strong>Deliver this link to the account holder yourself</strong>, over a channel you trust
   (a phone call to a number you already have, or in person — not a reply to whoever asked).
   Anyone who opens it can set a new password for the
-  <%= account.role %> account <strong><%= account.display_name %></strong> (<span class="mono"><%= account.username %></span>).
+  <%= account.role %> account <strong><%= account.display_name %></strong> (<span class="mono"><%= account.username %></span>)
+  of <strong><%= account.local_name %></strong> — confirm that is the local that asked for help.
   It works exactly once, expires in <%= ttlMinutes %> minutes, and any earlier reset link for
   this account no longer works.
 </div>

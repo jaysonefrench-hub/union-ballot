@@ -1,6 +1,15 @@
 /**
  * routes/voter.js — The voting experience. No account, no name, no login:
  * a voter presents only their anonymous one-time credential.
+ *
+ * TENANCY: voters are deliberately NOT asked which local they belong to —
+ * the credential itself is the scope. A credential matches exactly one
+ * election (salted hash per credential), and that election belongs to
+ * exactly one local, so a voter can only ever open and cast the ballot the
+ * credential was issued for. Audit events that belong to an election are
+ * written to that election's local chain; events with no matching election
+ * (rejected credentials, rate limits) carry no local and land on the
+ * platform chain, where every local's observers can still see them.
  */
 'use strict';
 
@@ -102,7 +111,8 @@ module.exports = function voterRoutes({ flash }) {
     }
     const m = db.prepare('SELECT * FROM members WHERE email_verify_token_hash=?').get(hashVerifyToken(token));
     if (!m) {
-      audit('voter-portal', 'member.email_verify_rejected', 'An email confirmation link was opened that did not match any pending confirmation (token not recorded)');
+      /* No member matched, so no local can be attributed — platform chain. */
+      audit(null, 'voter-portal', 'member.email_verify_rejected', 'An email confirmation link was opened that did not match any pending confirmation (token not recorded)');
       return fail('This confirmation link is not valid or was already used. If you have not confirmed your email yet, ask the election committee to resend the link.');
     }
     const sentAt = m.email_verify_sent_at ? new Date(m.email_verify_sent_at.replace(' ', 'T') + 'Z') : null;
@@ -110,7 +120,7 @@ module.exports = function voterRoutes({ flash }) {
       return fail('This confirmation link has expired. Ask the election committee to resend it.');
     }
     db.prepare("UPDATE members SET email_verified=1, email_verified_at=datetime('now'), email_verify_token_hash=NULL WHERE id=?").run(m.id);
-    audit('voter-portal', 'member.email_verified', `Member #${m.id} (${m.name}) confirmed their email address for electronic ballot delivery`);
+    audit(m.local_id, 'voter-portal', 'member.email_verified', `Member #${m.id} (${m.name}) confirmed their email address for electronic ballot delivery`);
     return res.render('verify-email', {
       title: 'Email confirmed',
       ok: true,
@@ -122,13 +132,15 @@ module.exports = function voterRoutes({ flash }) {
   router.post('/vote', (req, res) => {
     const rl = rateLimit(req);
     if (rl.blocked) {
-      if (rl.firstBlock) audit('voter-portal', 'vote.rate_limited', 'Credential submissions from one address exceeded the rate limit and are being throttled (address not recorded)');
+      if (rl.firstBlock) audit(null, 'voter-portal', 'vote.rate_limited', 'Credential submissions from one address exceeded the rate limit and are being throttled (address not recorded)');
       flash(req, 'error', `Too many attempts from your connection. Please wait about ${Math.ceil(rl.retryMs / 1000)} seconds, then try again. If you keep seeing this, contact the election committee.`);
       return res.redirect('/');
     }
     const cred = findLiveCredential(req.body.credential);
     if (!cred) {
-      audit('voter-portal', 'vote.credential_rejected', 'A credential was entered that did not match any live credential for an open vote');
+      /* Matches no election, so no local — platform chain (surfaced to every
+       * local's observers as an instance-wide security event). */
+      audit(null, 'voter-portal', 'vote.credential_rejected', 'A credential was entered that did not match any live credential for an open vote');
       flash(req, 'error', 'That credential was not recognized for any open vote. Check for typos, or contact the election committee if you believe it should work.');
       return res.redirect('/');
     }
@@ -151,7 +163,7 @@ module.exports = function voterRoutes({ flash }) {
     try {
       const rl = rateLimit(req);
       if (rl.blocked) {
-        if (rl.firstBlock) audit('voter-portal', 'vote.rate_limited', 'Ballot-cast submissions from one address exceeded the rate limit and are being throttled (address not recorded)');
+        if (rl.firstBlock) audit(null, 'voter-portal', 'vote.rate_limited', 'Ballot-cast submissions from one address exceeded the rate limit and are being throttled (address not recorded)');
         flash(req, 'error', `Too many attempts from your connection. Please wait about ${Math.ceil(rl.retryMs / 1000)} seconds, then try again.`);
         return res.redirect('/');
       }
@@ -194,8 +206,9 @@ module.exports = function voterRoutes({ flash }) {
       });
       cast();
 
-      /* Log an anonymous counter event only — never who, never what. */
-      audit('voter-portal', 'vote.ballot_cast', `A ballot was cast in election #${election.id} ("${election.title}")`);
+      /* Log an anonymous counter event only — never who, never what — on the
+       * chain of the local that owns this election. */
+      audit(election.local_id, 'voter-portal', 'vote.ballot_cast', `A ballot was cast in election #${election.id} ("${election.title}")`);
 
       const turnout = db.prepare('SELECT COUNT(*) AS n FROM turnout WHERE election_id=?').get(election.id).n;
       const eligible = JSON.parse(election.eligibility_snapshot || '[]').length;

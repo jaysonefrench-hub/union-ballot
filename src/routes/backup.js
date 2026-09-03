@@ -1,20 +1,28 @@
 /**
- * routes/backup.js — Encrypted, downloadable snapshot of the whole database.
+ * routes/backup.js — Encrypted snapshot of the whole database (helper).
+ *
+ * MULTI-LOCAL NOTE: the database now holds EVERY local's data, so the
+ * whole-database backup is a PLATFORM-ADMINISTRATOR function (mounted by
+ * src/routes/platform.js), not a committee one — a committee download of the
+ * full database would hand one local every other local's roster. Committees
+ * keep their own per-election records archive (their one-year retention
+ * duty) from the election page.
  *
  * WHY ENCRYPTED: a backup of the election database contains member names and
  * emails, turnout, hashed credentials, the (already-encrypted) reissue map,
  * results, and the audit log. It is retained for a year and may be copied
  * off-site, so it must never sit around as a readable file. Each backup is
- * sealed with AES-256-GCM under a committee-held BACKUP_KEY: a 256-bit hex key
- * supplied as an environment variable, kept OUTSIDE the database and separate
- * from REISSUE_KEY and SESSION_SECRET.
+ * sealed with AES-256-GCM under BACKUP_KEY: a 256-bit hex key supplied as an
+ * environment variable, kept OUTSIDE the database and separate from
+ * REISSUE_KEY and SESSION_SECRET.
  *
  * WHY IT CANNOT CONTAIN KEY SHARES: the election private key is split into
  * Shamir shares that are shown once at the key ceremony and NEVER written to
  * the database (the elections table records only the public key and the
  * keyholders' names). The private key is never stored either. A database
  * backup therefore cannot contain any share or plaintext election key — only
- * material that is already encrypted or non-secret.
+ * material that is already encrypted or non-secret. No backup can open a
+ * ballot.
  *
  * Restore with scripts/decrypt-backup.js.
  */
@@ -24,8 +32,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const express = require('express');
-const { db, audit } = require('../db');
+const { db } = require('../db');
 
 const MAGIC = Buffer.from('UNIONBALLOT1\n', 'utf8'); // file-format marker + version
 
@@ -64,23 +71,4 @@ async function createEncryptedBackup() {
   }
 }
 
-module.exports = function backupRoutes({ flash }) {
-  const router = express.Router();
-
-  router.get('/backup', async (req, res, next) => {
-    try {
-      const buf = await createEncryptedBackup();
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '');
-      audit(req.session.user.username, 'backup.exported',
-        `Encrypted database backup downloaded (AES-256-GCM under BACKUP_KEY, ${buf.length} bytes). Contains no key shares and no plaintext election key.`);
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="union-ballot-backup-${stamp}.ubk"`);
-      res.send(buf);
-    } catch (err) {
-      if (err && err.publicMessage) { flash(req, 'error', err.publicMessage); return res.redirect('/admin'); }
-      next(err);
-    }
-  });
-
-  return router;
-};
+module.exports = { createEncryptedBackup };

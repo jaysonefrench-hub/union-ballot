@@ -4,8 +4,8 @@
  * Same discipline as the member email-verification tokens: 128 bits from the
  * CSPRNG, stored ONLY as an unsalted SHA-256 hash (direct lookup; the input
  * space cannot be brute forced), single use, and expiring. The plaintext
- * token exists only inside the reset link — in the email, or on the
- * platform owner's one-time display — and is never written to the database,
+ * token exists only inside the reset link — in the email, or on the platform
+ * administrator's one-time display — and is never written to the database,
  * the audit log, or the console.
  *
  * The system never emails, displays, or stores a recoverable password:
@@ -25,7 +25,7 @@ const RESET_TOKEN_TTL_MINUTES = Math.max(5, Number(process.env.RESET_TOKEN_TTL_M
 /**
  * Start (or restart) a password reset for one account: a fresh token
  * invalidates any previous one. Returns the reset URL for delivery; the
- * caller decides how (email, or the platform owner's one-time display) and
+ * caller decides how (email, or the platform admin's one-time display) and
  * writes the audit entry — never including the token itself.
  */
 function beginPasswordReset(userId) {
@@ -47,7 +47,9 @@ function findUserByValidResetToken(token) {
   if (!u) return { ok: false, reason: 'unknown' };
   const sentAt = u.reset_token_sent_at ? new Date(u.reset_token_sent_at.replace(' ', 'T') + 'Z') : null;
   if (!sentAt || (Date.now() - sentAt.getTime()) > RESET_TOKEN_TTL_MINUTES * 60 * 1000) {
-    return { ok: false, reason: 'expired' };
+    /* user is included so the caller can attribute the audit entry to the
+     * account's local; it is never rendered for an invalid token. */
+    return { ok: false, reason: 'expired', user: u };
   }
   return { ok: true, user: u };
 }

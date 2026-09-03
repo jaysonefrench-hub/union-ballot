@@ -1,13 +1,19 @@
 /**
- * routes/admin.js — Election-committee functions.
+ * routes/admin.js — Election-committee functions, for ONE local.
  *
  * Note what an administrator here can and cannot do:
  *   CAN:  manage the roster, configure votes, issue/void credentials,
- *         open/close voting, run the tally CEREMONY, export records.
+ *         open/close voting, run the tally CEREMONY, export records —
+ *         for their own local only.
  *   CANNOT: read any ballot. Ballots are sealed to the election public key;
  *         the private key exists only as Shamir shares held by keyholders
  *         (candidate representatives + a neutral). The tally requires K of N
  *         shares entered together, ideally with observers present.
+ *   CANNOT: reach any other local. server.js mounts this router behind
+ *         resolveLocal, so req.localId is the signed-in account's local, and
+ *         every query below carries it (directly, or through an election row
+ *         fetched with the local_id check). A guessed id from another local
+ *         behaves exactly like an id that never existed.
  */
 'use strict';
 
@@ -25,25 +31,10 @@ const { buildArchive, writeSealedArchive } = require('../archives');
 const {
   electionSkipsEmailVerify, markTestElectionBanner, demoSkipForCreate,
 } = require('../election-demo');
+const tenant = require('../tenant');
+const { US_JURISDICTIONS, JURISDICTION_CODES } = require('../jurisdictions');
 
 const BASE_URL = () => process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-
-/* US state/territory codes for the election jurisdiction field. */
-const US_JURISDICTIONS = [
-  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
-  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['DC', 'District of Columbia'],
-  ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'],
-  ['IN', 'Indiana'], ['IA', 'Iowa'], ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'],
-  ['ME', 'Maine'], ['MD', 'Maryland'], ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'],
-  ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'],
-  ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'], ['NY', 'New York'],
-  ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'], ['OK', 'Oklahoma'], ['OR', 'Oregon'],
-  ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'], ['SD', 'South Dakota'],
-  ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'],
-  ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
-  ['XX', 'Other / outside the United States'],
-];
-const JURISDICTION_CODES = new Set(US_JURISDICTIONS.map(([code]) => code));
 
 /**
  * Florida PERC hard stop: a BINDING electronic contract-ratification vote in
@@ -78,9 +69,10 @@ function beginEmailVerification(memberId) {
   return `${BASE_URL()}/verify-email?token=${token}`;
 }
 
-function getElection(id) {
-  const e = db.prepare('SELECT * FROM elections WHERE id=?').get(id);
-  if (!e) { const err = new Error('no such election'); err.publicMessage = 'Election not found.'; throw err; }
+/** Election WITH its races/candidates — only if it belongs to this local
+ * (throws a 404 otherwise; tenant.getElection carries the local_id check). */
+function getElection(localId, id) {
+  const e = tenant.getElection(localId, id);
   e.races = db.prepare('SELECT * FROM races WHERE election_id=? ORDER BY position, id').all(e.id);
   for (const r of e.races) r.candidates = db.prepare('SELECT * FROM candidates WHERE race_id=? ORDER BY position, id').all(r.id);
   return e;
@@ -91,11 +83,18 @@ function getElection(id) {
  * issuance. Binding elections require email_verified=1. A TEST election with
  * demo_skip_email_verify=1 accepts syntactically valid emails even when
  * unverified. Paper (flagged, or no email) is unchanged either way.
+ *
+ * SCOPED TO THE ELECTION'S OWN LOCAL: eligibility is read from the election
+ * row itself (not the session), so only members of the local that owns this
+ * election can ever be swept into its credential issuance. An instance-wide
+ * roster query here once pulled a stray pre-existing member from outside the
+ * local into a new election's issuance — that class of bug is what the
+ * local_id filter below exists to prevent.
  */
 function listCredentialPaths(election) {
   const skipVerify = electionSkipsEmailVerify(election);
-  const paper = db.prepare("SELECT * FROM members WHERE good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='') ORDER BY name").all();
-  const withEmail = db.prepare("SELECT * FROM members WHERE good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email!='' ORDER BY name").all();
+  const paper = db.prepare("SELECT * FROM members WHERE local_id=? AND good_standing=1 AND (needs_paper_ballot=1 OR email IS NULL OR email='') ORDER BY name").all(election.local_id);
+  const withEmail = db.prepare("SELECT * FROM members WHERE local_id=? AND good_standing=1 AND needs_paper_ballot=0 AND email IS NOT NULL AND email!='' ORDER BY name").all(election.local_id);
   const electronic = [];
   const unverified = [];
   const invalidSyntax = [];
@@ -116,18 +115,18 @@ module.exports = function adminRoutes({ flash }) {
 
   /* ---------------- dashboard ---------------- */
   router.get('/', (req, res) => {
-    const elections = db.prepare('SELECT * FROM elections ORDER BY id DESC').all();
+    const elections = db.prepare('SELECT * FROM elections WHERE local_id=? ORDER BY id DESC').all(req.localId);
     for (const e of elections) {
       e.turnout = db.prepare('SELECT COUNT(*) AS n FROM turnout WHERE election_id=?').get(e.id).n;
       e.eligible = JSON.parse(e.eligibility_snapshot || '[]').length;
     }
-    const memberCount = db.prepare('SELECT COUNT(*) AS n FROM members').get().n;
+    const memberCount = db.prepare('SELECT COUNT(*) AS n FROM members WHERE local_id=?').get(req.localId).n;
     res.render('admin/dashboard', { title: 'Election committee', elections, memberCount, smtp: smtpConfigured() });
   });
 
   /* ---------------- members ---------------- */
   router.get('/members', (req, res) => {
-    const members = db.prepare('SELECT * FROM members ORDER BY name').all();
+    const members = db.prepare('SELECT * FROM members WHERE local_id=? ORDER BY name').all(req.localId);
     res.render('admin/members', { title: 'Member roster', members, smtp: smtpConfigured() });
   });
 
@@ -166,11 +165,11 @@ module.exports = function adminRoutes({ flash }) {
         valid.push({ name, email: email || null, num: num || null });
       });
 
-      const ins = db.prepare('INSERT INTO members (name, email, member_number) VALUES (?,?,?)');
+      const ins = db.prepare('INSERT INTO members (local_id, name, email, member_number) VALUES (?,?,?,?)');
       const withEmail = []; // { id, name, email } — need verification before electronic delivery
       db.transaction(() => {
         for (const v of valid) {
-          const info = ins.run(v.name, v.email, v.num);
+          const info = ins.run(req.localId, v.name, v.email, v.num);
           if (v.email) withEmail.push({ id: info.lastInsertRowid, name: v.name, email: v.email });
         }
       })();
@@ -178,7 +177,7 @@ module.exports = function adminRoutes({ flash }) {
       /* Counts only in the audit log — the rejected addresses themselves are
        * shown to the committee on the report page, not written to the
        * observer-visible permanent record. */
-      audit(req.session.user.username, 'roster.import',
+      audit(req.localId, req.session.user.username, 'roster.import',
         `${added} members added to roster (${withEmail.length} with email, pending verification)`
         + (rejected.length ? `; ${rejected.length} row(s) NOT imported (invalid email syntax or missing name), reported to the committee for correction` : ''));
 
@@ -194,7 +193,7 @@ module.exports = function adminRoutes({ flash }) {
             sent++;
           } catch (err) { failures.push(`${m.name} <${m.email}>: ${err.message}`); }
         }
-        audit(req.session.user.username, 'roster.verification_emails_sent', `${sent} email-verification link(s) sent after import, ${failures.length} failed`);
+        audit(req.localId, req.session.user.username, 'roster.verification_emails_sent', `${sent} email-verification link(s) sent after import, ${failures.length} failed`);
       }
 
       /* Anything rejected → show the full report page (row/name/email/reason
@@ -222,7 +221,7 @@ module.exports = function adminRoutes({ flash }) {
 
   router.post('/members/:id/update', async (req, res, next) => {
     try {
-      const m = db.prepare('SELECT * FROM members WHERE id=?').get(req.params.id);
+      const m = tenant.getMember(req.localId, req.params.id);
       if (!m) return res.redirect('/admin/members');
       const good = req.body.good_standing === '1' ? 1 : 0;
       const paper = req.body.needs_paper_ballot === '1' ? 1 : 0;
@@ -240,14 +239,16 @@ module.exports = function adminRoutes({ flash }) {
         }
       }
       const emailChanged = (newEmail || '') !== (m.email || '');
-      db.prepare('UPDATE members SET good_standing=?, needs_paper_ballot=?, email=? WHERE id=?')
-        .run(good, paper, newEmail, m.id);
+      /* m was fetched with the local check; AND local_id here is defense in
+       * depth so this write can never widen past the local. */
+      db.prepare('UPDATE members SET good_standing=?, needs_paper_ballot=?, email=? WHERE id=? AND local_id=?')
+        .run(good, paper, newEmail, m.id, req.localId);
       /* A changed address is a NEW claim: any previous verification (and any
        * outstanding token) no longer proves anything about it. */
       if (emailChanged) {
-        db.prepare('UPDATE members SET email_verified=0, email_verified_at=NULL, email_verify_token_hash=NULL, email_verify_sent_at=NULL WHERE id=?').run(m.id);
+        db.prepare('UPDATE members SET email_verified=0, email_verified_at=NULL, email_verify_token_hash=NULL, email_verify_sent_at=NULL WHERE id=? AND local_id=?').run(m.id, req.localId);
       }
-      audit(req.session.user.username, 'roster.update', `Member #${m.id} (${m.name}): good_standing=${good}, paper=${paper}${emailChanged ? '; email changed — verification reset' : ''}`);
+      audit(req.localId, req.session.user.username, 'roster.update', `Member #${m.id} (${m.name}): good_standing=${good}, paper=${paper}${emailChanged ? '; email changed — verification reset' : ''}`);
       if (emailChanged && newEmail && smtpConfigured()) {
         const verifyUrl = beginEmailVerification(m.id);
         try {
@@ -266,7 +267,7 @@ module.exports = function adminRoutes({ flash }) {
   /* ---------------- (re)send an email-verification link ---------------- */
   router.post('/members/:id/send-verification', async (req, res, next) => {
     try {
-      const m = db.prepare('SELECT * FROM members WHERE id=?').get(req.params.id);
+      const m = tenant.getMember(req.localId, req.params.id);
       if (!m) return res.redirect('/admin/members');
       if (!m.email) { flash(req, 'error', `${m.name} has no email address on the roster; they use the paper-ballot method.`); return res.redirect('/admin/members'); }
       if (m.email_verified) { flash(req, 'ok', `${m.name}'s email address is already verified.`); return res.redirect('/admin/members'); }
@@ -274,13 +275,13 @@ module.exports = function adminRoutes({ flash }) {
       const verifyUrl = beginEmailVerification(m.id);
       if (smtpConfigured()) {
         await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl });
-        audit(req.session.user.username, 'roster.verification_email_sent', `Verification link (re)sent to member #${m.id} (${m.name}); any previous link is now invalid`);
+        audit(req.localId, req.session.user.username, 'roster.verification_email_sent', `Verification link (re)sent to member #${m.id} (${m.name}); any previous link is now invalid`);
         flash(req, 'ok', `Verification link emailed to ${m.name} <${m.email}>. Any earlier link no longer works.`);
         res.redirect('/admin/members');
       } else {
         /* No SMTP: show the link exactly once for manual delivery (same
          * pattern as the one-time credential export). */
-        audit(req.session.user.username, 'roster.verification_link_displayed', `One-time verification link displayed for member #${m.id} (${m.name}) for manual delivery; any previous link is now invalid`);
+        audit(req.localId, req.session.user.username, 'roster.verification_link_displayed', `One-time verification link displayed for member #${m.id} (${m.name}) for manual delivery; any previous link is now invalid`);
         res.render('admin/verify-link-once', { title: 'One-time verification link', m, verifyUrl });
       }
     } catch (err) { next(err); }
@@ -288,7 +289,13 @@ module.exports = function adminRoutes({ flash }) {
 
   /* ---------------- create election + key ceremony ---------------- */
   router.get('/elections/new', (req, res) => {
-    res.render('admin/election-new', { title: 'New vote', jurisdictions: US_JURISDICTIONS });
+    res.render('admin/election-new', {
+      title: 'New vote',
+      jurisdictions: US_JURISDICTIONS,
+      /* Pre-select the local's own state; the committee can still override
+       * per election (a unit may sit in a different jurisdiction). */
+      defaultJurisdiction: req.local.jurisdiction || '',
+    });
   });
 
   router.post('/elections/new', (req, res) => {
@@ -313,7 +320,7 @@ module.exports = function adminRoutes({ flash }) {
     const percAck = req.body.perc_variance_ack === '1' ? 1 : 0;
     const percRef = percAck ? String(req.body.perc_variance_ref || '').trim() : '';
     if (percRatificationBlocked({ jurisdiction, kind, isTest, varianceAck: percAck })) {
-      audit(req.session.user.username, 'election.create_blocked_perc',
+      audit(req.localId, req.session.user.username, 'election.create_blocked_perc',
         `Creation of a binding Florida electronic contract-ratification vote ("${String(title || '').trim()}") was blocked: no PERC variance acknowledgment recorded (FAC 60CC-4.002)`);
       flash(req, 'error', PERC_BLOCK_MESSAGE);
       return res.redirect('/admin/elections/new');
@@ -354,9 +361,9 @@ module.exports = function adminRoutes({ flash }) {
     let electionId;
     db.transaction(() => {
       const info = db.prepare(`INSERT INTO elections
-        (title, kind, jurisdiction, perc_variance_ack, perc_variance_ref, iaff_legal_approval, is_test, demo_skip_email_verify, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(title.trim(), kind, jurisdiction, percAck, percRef || null, approvalRef || null, isTest, demoSkip, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
+        (local_id, title, kind, jurisdiction, perc_variance_ack, perc_variance_ref, iaff_legal_approval, is_test, demo_skip_email_verify, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(req.localId, title.trim(), kind, jurisdiction, percAck, percRef || null, approvalRef || null, isTest, demoSkip, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
           keys.publicKey, sharesTotal, threshold, JSON.stringify(keyholders));
       electionId = info.lastInsertRowid;
       for (let i = 0; i < raceTitles.length; i++) {
@@ -368,7 +375,7 @@ module.exports = function adminRoutes({ flash }) {
       }
     })();
 
-    audit(req.session.user.username, 'election.created',
+    audit(req.localId, req.session.user.username, 'election.created',
       `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${approvalRef ? `; IAFF Legal Dept approval recorded: ${approvalRef}` : ''}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''} — not verified by this system` : ''}${demoSkip ? '; DEMO skip-email-verify ON (TEST dry-run)' : ''}`);
 
     /* Shares are displayed exactly once and never stored. */
@@ -381,13 +388,15 @@ module.exports = function adminRoutes({ flash }) {
 
   /* ---------------- election detail ---------------- */
   router.get('/elections/:id', (req, res) => {
-    const e = getElection(req.params.id);
+    const e = getElection(req.localId, req.params.id);
     const credStats = db.prepare('SELECT COUNT(*) AS total, SUM(redeemed) AS used, SUM(voided) AS voided FROM credentials WHERE election_id=?').get(e.id);
     const ballotCount = db.prepare('SELECT COUNT(*) AS n FROM ballots WHERE election_id=?').get(e.id).n;
     const turnout = db.prepare(`SELECT m.name, t.voted_on, t.method FROM turnout t JOIN members m ON m.id=t.member_id WHERE t.election_id=? ORDER BY m.name`).all(e.id);
     const eligible = JSON.parse(e.eligibility_snapshot || '[]');
     const eligibleMembers = eligible.map((s) => {
-      const m = db.prepare('SELECT id, name FROM members WHERE id=?').get(s.member_id);
+      /* Snapshot ids are this election's own, but keep the local check anyway:
+       * a name lookup must never cross into another local's roster. */
+      const m = db.prepare('SELECT id, name FROM members WHERE id=? AND local_id=?').get(s.member_id, req.localId);
       return { member_id: s.member_id, name: m ? m.name : `member #${s.member_id}`, method: s.method };
     });
     const paths = listCredentialPaths(e);
@@ -414,17 +423,18 @@ module.exports = function adminRoutes({ flash }) {
 
   /* ---------------- DEMO skip-email-verify toggle (TEST elections only) ---- */
   router.post('/elections/:id/demo-skip-email-verify', (req, res) => {
-    const e = getElection(req.params.id);
+    const e = getElection(req.localId, req.params.id);
     if (!e.is_test) {
-      audit(req.session.user.username, 'election.demo_skip_blocked',
+      audit(req.localId, req.session.user.username, 'election.demo_skip_blocked',
         `Election #${e.id} "${e.title}": refused to set demo_skip_email_verify — binding elections must require magic-link email verification`);
       flash(req, 'error', 'DEMO email-verify skip can only be set on TEST elections. Binding elections always require magic-link email verification.');
       return res.redirect(`/admin/elections/${e.id}`);
     }
     const next = req.body.demo_skip_email_verify === '1' ? 1 : 0;
-    /* AND is_test=1 is defense in depth: a binding row can never store a 1. */
-    db.prepare('UPDATE elections SET demo_skip_email_verify=? WHERE id=? AND is_test=1').run(next, e.id);
-    audit(req.session.user.username, 'election.demo_skip_email_verify',
+    /* AND is_test=1 is defense in depth: a binding row can never store a 1.
+     * AND local_id likewise: this write can never widen past the local. */
+    db.prepare('UPDATE elections SET demo_skip_email_verify=? WHERE id=? AND is_test=1 AND local_id=?').run(next, e.id, req.localId);
+    audit(req.localId, req.session.user.username, 'election.demo_skip_email_verify',
       `Election #${e.id} "${e.title}": demo_skip_email_verify set to ${next} (TEST dry-run ${next ? 'ON — unverified syntactically-valid emails eligible for electronic credentials' : 'OFF — magic-link verification required'})`);
     flash(req, 'ok', next
       ? 'DEMO skip-email-verify is ON for this TEST election. Electronic credentials can be issued to syntactically valid addresses without a magic-link confirm.'
@@ -435,10 +445,10 @@ module.exports = function adminRoutes({ flash }) {
   /* ---------------- issue credentials ---------------- */
   router.post('/elections/:id/issue-credentials', async (req, res, next) => {
     try {
-      const e = getElection(req.params.id);
+      const e = getElection(req.localId, req.params.id);
       if (e.status !== 'draft') { flash(req, 'error', 'Credentials were already issued for this vote.'); return res.redirect(`/admin/elections/${e.id}`); }
       if (percRatificationBlocked({ jurisdiction: e.jurisdiction, kind: e.kind, isTest: e.is_test, varianceAck: e.perc_variance_ack })) {
-        audit(req.session.user.username, 'election.credential_issue_blocked_perc',
+        audit(req.localId, req.session.user.username, 'election.credential_issue_blocked_perc',
           `Election #${e.id} "${e.title}": credential issuance blocked — binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
         flash(req, 'error', PERC_BLOCK_MESSAGE);
         return res.redirect(`/admin/elections/${e.id}`);
@@ -457,7 +467,7 @@ module.exports = function adminRoutes({ flash }) {
        */
       const { electronic, paper, unverified, invalidSyntax, skipVerify } = listCredentialPaths(e);
       if (invalidSyntax.length > 0) {
-        audit(req.session.user.username, 'election.credential_issue_blocked_email_syntax',
+        audit(req.localId, req.session.user.username, 'election.credential_issue_blocked_email_syntax',
           `Election #${e.id}: credential issuance blocked — ${invalidSyntax.length} member(s) on the electronic path have an address that fails syntax validation`);
         const names = invalidSyntax.slice(0, 5).map((m) => m.name).join(', ');
         flash(req, 'error',
@@ -467,7 +477,7 @@ module.exports = function adminRoutes({ flash }) {
         return res.redirect(`/admin/elections/${e.id}`);
       }
       if (unverified.length > 0) {
-        audit(req.session.user.username, 'election.credential_issue_blocked_unverified',
+        audit(req.localId, req.session.user.username, 'election.credential_issue_blocked_unverified',
           `Election #${e.id}: credential issuance blocked — ${unverified.length} member(s) on the electronic path have unverified email addresses`);
         const names = unverified.slice(0, 5).map((m) => m.name).join(', ');
         flash(req, 'error',
@@ -493,11 +503,11 @@ module.exports = function adminRoutes({ flash }) {
           ...electronic.map((m) => ({ member_id: m.id, method: 'electronic' })),
           ...paper.map((m) => ({ member_id: m.id, method: 'paper' })),
         ];
-        db.prepare("UPDATE elections SET status='credentials_issued', eligibility_snapshot=? WHERE id=?")
-          .run(JSON.stringify(snapshot), e.id);
+        db.prepare("UPDATE elections SET status='credentials_issued', eligibility_snapshot=? WHERE id=? AND local_id=?")
+          .run(JSON.stringify(snapshot), e.id, req.localId);
       })();
 
-      audit(req.session.user.username, 'election.credentials_issued',
+      audit(req.localId, req.session.user.username, 'election.credentials_issued',
         `Election #${e.id}: ${issued.length} electronic credentials generated (random, hashed at rest); ${paper.length} member(s) flagged for the alternative paper-ballot method${skipVerify ? '; DEMO skip-email-verify ON (unverified syntactically-valid emails included)' : ''}`);
 
       /* Deliver */
@@ -510,12 +520,12 @@ module.exports = function adminRoutes({ flash }) {
             sent++;
           } catch (err) { failures.push(`${member.name} <${member.email}>: ${err.message}`); }
         }
-        audit(req.session.user.username, 'election.credentials_emailed', `Election #${e.id}: ${sent} credential emails sent, ${failures.length} failed`);
+        audit(req.localId, req.session.user.username, 'election.credentials_emailed', `Election #${e.id}: ${sent} credential emails sent, ${failures.length} failed`);
         markTestElectionBanner(res, e);
         res.render('admin/credentials-sent', { title: 'Credentials emailed', e, sent, failures, paper });
       } else {
         /* One-time export for mail-merge; shown once, never retrievable again. */
-        audit(req.session.user.username, 'election.credentials_exported', `Election #${e.id}: one-time credential export displayed for mail-merge delivery`);
+        audit(req.localId, req.session.user.username, 'election.credentials_exported', `Election #${e.id}: one-time credential export displayed for mail-merge delivery`);
         markTestElectionBanner(res, e);
         res.render('admin/credentials-export', { title: 'One-time credential export', e, issued, paper, voteUrl });
       }
@@ -525,15 +535,17 @@ module.exports = function adminRoutes({ flash }) {
   /* ---------------- reissue a lost credential ---------------- */
   router.post('/elections/:id/reissue', async (req, res, next) => {
     try {
-      const e = getElection(req.params.id);
+      const e = getElection(req.localId, req.params.id);
       const memberId = Number(req.body.member_id);
-      const member = db.prepare('SELECT * FROM members WHERE id=?').get(memberId);
+      /* Tenant check on the member too: a posted id from another local's
+       * roster must behave exactly like a member that does not exist. */
+      const member = tenant.getMember(req.localId, memberId);
       if (!member || !['credentials_issued', 'open'].includes(e.status)) { flash(req, 'error', 'Reissue is only possible after credentials are issued and before the vote closes.'); return res.redirect(`/admin/elections/${e.id}`); }
 
       const reissueKey = getReissueKey();
       const rows = db.prepare('SELECT * FROM credentials WHERE election_id=? AND voided=0').all(e.id);
       const own = rows.find((c) => { try { return Number(aesDecrypt(c.member_ref, reissueKey)) === memberId; } catch { return false; } });
-      if (own && own.redeemed) { flash(req, 'error', `${member.name}'s credential was already used to cast a ballot; it cannot be reissued. If the member disputes this, treat it as a security incident.`); audit(req.session.user.username, 'election.reissue_blocked', `Election #${e.id}: reissue for member #${memberId} blocked — credential already redeemed`); return res.redirect(`/admin/elections/${e.id}`); }
+      if (own && own.redeemed) { flash(req, 'error', `${member.name}'s credential was already used to cast a ballot; it cannot be reissued. If the member disputes this, treat it as a security incident.`); audit(req.localId, req.session.user.username, 'election.reissue_blocked', `Election #${e.id}: reissue for member #${memberId} blocked — credential already redeemed`); return res.redirect(`/admin/elections/${e.id}`); }
 
       const credential = generateCredential();
       const salt = randomHex(16);
@@ -542,7 +554,7 @@ module.exports = function adminRoutes({ flash }) {
         db.prepare('INSERT INTO credentials (election_id, code_hash, salt, member_ref) VALUES (?,?,?,?)')
           .run(e.id, hashCredential(credential, salt), salt, aesEncrypt(String(memberId), reissueKey));
       })();
-      audit(req.session.user.username, 'election.credential_reissued', `Election #${e.id}: credential voided and reissued for one member (old credential invalidated)`);
+      audit(req.localId, req.session.user.username, 'election.credential_reissued', `Election #${e.id}: credential voided and reissued for one member (old credential invalidated)`);
 
       const voteUrl = (process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`) + '/';
       /* Email delivery only to a still-verified address (it may have been
@@ -563,27 +575,27 @@ module.exports = function adminRoutes({ flash }) {
 
   /* ---------------- open / close ---------------- */
   router.post('/elections/:id/open', (req, res) => {
-    const e = getElection(req.params.id);
+    const e = getElection(req.localId, req.params.id);
     if (e.status !== 'credentials_issued') { flash(req, 'error', 'Issue credentials before opening the vote.'); return res.redirect(`/admin/elections/${e.id}`); }
     /* Defense in depth: the Florida PERC ratification gate also holds at open,
      * covering elections created before this gate existed (or edited rows). */
     if (percRatificationBlocked({ jurisdiction: e.jurisdiction, kind: e.kind, isTest: e.is_test, varianceAck: e.perc_variance_ack })) {
-      audit(req.session.user.username, 'election.open_blocked_perc',
+      audit(req.localId, req.session.user.username, 'election.open_blocked_perc',
         `Election #${e.id} "${e.title}": opening blocked — binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
       flash(req, 'error', PERC_BLOCK_MESSAGE);
       return res.redirect(`/admin/elections/${e.id}`);
     }
-    db.prepare("UPDATE elections SET status='open' WHERE id=?").run(e.id);
-    audit(req.session.user.username, 'election.opened', `Election #${e.id} "${e.title}" opened for voting`);
+    db.prepare("UPDATE elections SET status='open' WHERE id=? AND local_id=?").run(e.id, req.localId);
+    audit(req.localId, req.session.user.username, 'election.opened', `Election #${e.id} "${e.title}" opened for voting`);
     flash(req, 'ok', 'Voting is open.');
     res.redirect(`/admin/elections/${e.id}`);
   });
 
   router.post('/elections/:id/close', (req, res) => {
-    const e = getElection(req.params.id);
+    const e = getElection(req.localId, req.params.id);
     if (e.status !== 'open') { flash(req, 'error', 'Only an open vote can be closed.'); return res.redirect(`/admin/elections/${e.id}`); }
-    db.prepare("UPDATE elections SET status='closed' WHERE id=?").run(e.id);
-    audit(req.session.user.username, 'election.closed', `Election #${e.id} "${e.title}" closed to voting`);
+    db.prepare("UPDATE elections SET status='closed' WHERE id=? AND local_id=?").run(e.id, req.localId);
+    audit(req.localId, req.session.user.username, 'election.closed', `Election #${e.id} "${e.title}" closed to voting`);
     flash(req, 'ok', 'Voting is closed. The ballots remain sealed until the tally ceremony.');
     res.redirect(`/admin/elections/${e.id}`);
   });
@@ -597,39 +609,47 @@ module.exports = function adminRoutes({ flash }) {
    * purgeReissueMap() itself refuses to run while voting is open. */
   router.post('/elections/:id/purge-reissue-map', (req, res, next) => {
     try {
-      const e = getElection(req.params.id);
+      const e = getElection(req.localId, req.params.id);
       if (!['closed', 'tallied'].includes(e.status)) {
         flash(req, 'error', 'Close voting before purging the reissue map.');
         return res.redirect(`/admin/elections/${e.id}`);
       }
-      const cleared = purgeReissueMap(e.id);
-      audit(req.session.user.username, 'election.reissue_map_purged',
+      const cleared = purgeReissueMap(e.id, req.localId);
+      audit(req.localId, req.session.user.username, 'election.reissue_map_purged',
         `Election #${e.id} "${e.title}": member<->credential reissue map destroyed after close (${cleared} credential record(s) cleared). Hashed credentials, turnout, sealed ballots, and audit log retained.`);
       flash(req, 'ok', cleared > 0
         ? `Reissue map destroyed — ${cleared} record(s) cleared. The stored name-to-credential link no longer exists for this election.`
         : 'The reissue map was already empty for this election; nothing to purge.');
       res.redirect(`/admin/elections/${e.id}`);
     } catch (err) {
-      /* purgeReissueMap throws with a publicMessage if voting is still open. */
-      if (err && err.publicMessage) { flash(req, 'error', err.publicMessage); return res.redirect(`/admin/elections/${req.params.id}`); }
+      /* purgeReissueMap throws with a publicMessage if voting is still open.
+       * A tenant not-found (err.status 404 — another local's election id)
+       * must fall through to the error handler and render as nonexistent. */
+      if (err && err.publicMessage && !err.status) { flash(req, 'error', err.publicMessage); return res.redirect(`/admin/elections/${req.params.id}`); }
       next(err);
     }
   });
 
   /* ---------------- record a paper ballot received ---------------- */
   router.post('/elections/:id/paper-received', (req, res) => {
-    const e = getElection(req.params.id);
+    const e = getElection(req.localId, req.params.id);
     const memberId = Number(req.body.member_id);
     if (!['open', 'closed'].includes(e.status)) { flash(req, 'error', 'Paper ballots can be recorded while the vote is open or closed (before tally).'); return res.redirect(`/admin/elections/${e.id}`); }
+    /* The member must belong to this local — a foreign id must never land on
+     * this election's turnout list. */
+    if (!tenant.getMember(req.localId, memberId)) {
+      flash(req, 'error', 'That member is not on this local\u2019s roster; no paper ballot was recorded.');
+      return res.redirect(`/admin/elections/${e.id}`);
+    }
     db.prepare('INSERT OR IGNORE INTO turnout (election_id, member_id, voted_on, method) VALUES (?,?,date(\'now\'),\'paper\')').run(e.id, memberId);
-    audit(req.session.user.username, 'election.paper_ballot_received', `Election #${e.id}: a sealed paper ballot was logged as received (member marked as voted)`);
+    audit(req.localId, req.session.user.username, 'election.paper_ballot_received', `Election #${e.id}: a sealed paper ballot was logged as received (member marked as voted)`);
     flash(req, 'ok', 'Paper ballot receipt recorded. Count paper ballots with observers present and add them to the electronic results.');
     res.redirect(`/admin/elections/${e.id}`);
   });
 
   /* ---------------- tally ceremony ---------------- */
   router.get('/elections/:id/tally', (req, res) => {
-    const e = getElection(req.params.id);
+    const e = getElection(req.localId, req.params.id);
     if (e.status !== 'closed') { flash(req, 'error', 'Close the vote before tallying.'); return res.redirect(`/admin/elections/${e.id}`); }
     markTestElectionBanner(res, e);
     res.render('admin/tally', { title: 'Tally ceremony', e });
@@ -637,7 +657,7 @@ module.exports = function adminRoutes({ flash }) {
 
   router.post('/elections/:id/tally', (req, res, next) => {
     try {
-      const e = getElection(req.params.id);
+      const e = getElection(req.localId, req.params.id);
       if (e.status !== 'closed') { flash(req, 'error', 'Close the vote before tallying.'); return res.redirect(`/admin/elections/${e.id}`); }
 
       let shares = req.body.share || [];
@@ -652,7 +672,7 @@ module.exports = function adminRoutes({ flash }) {
       try {
         privateKey = combineShares(shares.slice(0, e.key_threshold));
       } catch (err) {
-        audit(req.session.user.username, 'tally.key_reconstruction_failed', `Election #${e.id}: key share combination failed — ${err.message}`);
+        audit(req.localId, req.session.user.username, 'tally.key_reconstruction_failed', `Election #${e.id}: key share combination failed — ${err.message}`);
         flash(req, 'error', err.message);
         return res.redirect(`/admin/elections/${e.id}/tally`);
       }
@@ -661,7 +681,7 @@ module.exports = function adminRoutes({ flash }) {
       /* Integrity check: sealed ballots must equal redeemed credentials. */
       const redeemed = db.prepare('SELECT COUNT(*) AS n FROM credentials WHERE election_id=? AND redeemed=1').get(e.id).n;
       if (rows.length !== redeemed) {
-        audit(req.session.user.username, 'tally.INTEGRITY_ALERT', `Election #${e.id}: ballot count (${rows.length}) does not match redeemed credentials (${redeemed}) — investigate before certifying`);
+        audit(req.localId, req.session.user.username, 'tally.INTEGRITY_ALERT', `Election #${e.id}: ballot count (${rows.length}) does not match redeemed credentials (${redeemed}) — investigate before certifying`);
       }
 
       /* Shuffle before decrypting so even the ceremony reveals no order. */
@@ -672,7 +692,7 @@ module.exports = function adminRoutes({ flash }) {
         try { ballots.push(decryptBallot(row.payload, privateKey)); } catch { failed++; }
       }
       if (failed > 0 && ballots.length === 0) {
-        audit(req.session.user.username, 'tally.decrypt_failed', `Election #${e.id}: ballots failed to decrypt — wrong shares or tampering`);
+        audit(req.localId, req.session.user.username, 'tally.decrypt_failed', `Election #${e.id}: ballots failed to decrypt — wrong shares or tampering`);
         flash(req, 'error', 'The ballots did not decrypt. Verify each keyholder pasted their full share for THIS election.');
         return res.redirect(`/admin/elections/${e.id}/tally`);
       }
@@ -757,9 +777,9 @@ module.exports = function adminRoutes({ flash }) {
         });
       }
 
-      db.prepare("UPDATE elections SET status='tallied', results_json=?, tallied_at=datetime('now') WHERE id=?")
-        .run(JSON.stringify(results), e.id);
-      audit(req.session.user.username, 'tally.completed',
+      db.prepare("UPDATE elections SET status='tallied', results_json=?, tallied_at=datetime('now') WHERE id=? AND local_id=?")
+        .run(JSON.stringify(results), e.id, req.localId);
+      audit(req.localId, req.session.user.username, 'tally.completed',
         `Election #${e.id} "${e.title}": ${ballots.length} ballots unsealed with ${e.key_threshold}-of-${e.key_shares_total} key shares and counted. Integrity ${results.integrity_ok ? 'OK' : 'ALERT — see log'}.`);
 
       /*
@@ -772,12 +792,12 @@ module.exports = function adminRoutes({ flash }) {
        * block the tally itself — the results above are already committed.
        */
       try {
-        const rec = writeSealedArchive(e.id);
-        audit(req.session.user.username, 'election.archive_stored',
+        const rec = writeSealedArchive(e.id, req.localId);
+        audit(req.localId, req.session.user.username, 'election.archive_stored',
           `Election #${e.id}: sealed records archive stored automatically as ${rec.filename} (${rec.encrypted ? 'AES-256-GCM under BACKUP_KEY' : 'plaintext JSON — set BACKUP_KEY to encrypt archives at rest'}; ${rec.ballot_count} encrypted ballots; sha256 ${rec.sha256})`);
       } catch (archiveErr) {
         console.error('[archive] automatic records archive failed:', archiveErr.message);
-        audit(req.session.user.username, 'election.archive_store_failed',
+        audit(req.localId, req.session.user.username, 'election.archive_store_failed',
           `Election #${e.id}: automatic records archive could NOT be stored (${String(archiveErr.message || 'unknown error').slice(0, 180)}). Export the archive manually from the election page and keep a copy off-site.`);
       }
 
@@ -790,15 +810,15 @@ module.exports = function adminRoutes({ flash }) {
    * Manual export, unchanged in content: buildArchive() is shared with the
    * automatic tally-time sealed archive so the two can never diverge. */
   router.get('/elections/:id/archive', (req, res) => {
-    const archive = buildArchive(req.params.id);
-    audit(req.session.user.username, 'election.archive_exported', `Election #${archive.election.id}: records archive exported for retention`);
+    const archive = buildArchive(req.params.id, req.localId);
+    audit(req.localId, req.session.user.username, 'election.archive_exported', `Election #${archive.election.id}: records archive exported for retention`);
     res.setHeader('Content-Disposition', `attachment; filename="election-${archive.election.id}-records.json"`);
     res.json(archive);
   });
 
-  /* ---------------- committee & observer accounts ---------------- */
+  /* ---------------- committee & observer accounts (this local only) ------ */
   router.get('/users', (req, res) => {
-    const users = db.prepare('SELECT id, username, role, display_name, email, created_at FROM users ORDER BY role, username').all();
+    const users = db.prepare('SELECT id, username, role, display_name, email, created_at FROM users WHERE local_id=? ORDER BY role, username').all(req.localId);
     res.render('admin/users', { title: 'Accounts', users, smtp: smtpConfigured() });
   });
 
@@ -813,26 +833,37 @@ module.exports = function adminRoutes({ flash }) {
       if (!check.ok) { flash(req, 'error', `Account not created. "${email}" does not look like a deliverable email address — ${check.reason}.`); return res.redirect('/admin/users'); }
     }
     const r = role === 'admin' ? 'admin' : 'observer';
-    db.prepare('INSERT INTO users (username, password_hash, role, display_name, email) VALUES (?,?,?,?,?)')
-      .run(username.trim(), bcrypt.hashSync(password, 12), r, (display_name || username).trim(), email);
-    audit(req.session.user.username, 'users.created', `${r} account "${username.trim()}" created (${(display_name || username).trim()})${email ? ' with a recovery email on file' : ''}`);
+    try {
+      db.prepare('INSERT INTO users (local_id, username, password_hash, role, display_name, email) VALUES (?,?,?,?,?,?)')
+        .run(req.localId, username.trim(), bcrypt.hashSync(password, 12), r, (display_name || username).trim(), email);
+    } catch (err) {
+      /* Usernames are unique across the whole platform (sign-in has no local
+       * selector), so a collision with ANY local's account lands here. The
+       * message deliberately does not say where the name is in use. */
+      if (err && String(err.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        flash(req, 'error', `The username "${username.trim()}" is already in use on this platform. Pick a different one (e.g. add your local number).`);
+        return res.redirect('/admin/users');
+      }
+      throw err;
+    }
+    audit(req.localId, req.session.user.username, 'users.created', `${r} account "${username.trim()}" created (${(display_name || username).trim()})${email ? ' with a recovery email on file' : ''}`);
     flash(req, 'ok', `${r === 'admin' ? 'Administrator' : 'Observer'} account created.`);
     res.redirect('/admin/users');
   });
 
   /* Set or clear an account's recovery email. Without one, the account
    * cannot use the emailed forgot-password flow — recovery then requires the
-   * platform owner to generate a one-time reset link. */
+   * platform administrator to generate a one-time reset link. */
   router.post('/users/:id/email', (req, res) => {
-    const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+    const u = tenant.getUser(req.localId, req.params.id);
     if (!u) return res.redirect('/admin/users');
     const email = (req.body.email || '').trim() || null;
     if (email) {
       const check = checkEmailSyntax(email);
       if (!check.ok) { flash(req, 'error', `Not saved. "${email}" does not look like a deliverable email address — ${check.reason}.`); return res.redirect('/admin/users'); }
     }
-    db.prepare('UPDATE users SET email=? WHERE id=?').run(email, u.id);
-    audit(req.session.user.username, 'users.email_set',
+    db.prepare('UPDATE users SET email=? WHERE id=? AND local_id=?').run(email, u.id, req.localId);
+    audit(req.localId, req.session.user.username, 'users.email_set',
       email ? `Recovery email set for account "${u.username}"` : `Recovery email removed from account "${u.username}"`);
     flash(req, 'ok', email
       ? `Recovery email saved for ${u.username}. Password-reset links can now be emailed to it.`

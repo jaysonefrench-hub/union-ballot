@@ -1,6 +1,6 @@
 /**
  * simple-rate-limit.js — Minimal fixed-window per-IP limiter for low-volume
- * authentication endpoints (platform-owner sign-in, password-reset requests).
+ * authentication endpoints (platform sign-in/setup, password-reset requests).
  * In-memory is sufficient for a single-instance deployment; nothing here is
  * persisted, and nothing links to any ballot. The voter-facing credential
  * limiter in routes/voter.js is separate and deliberately more generous.

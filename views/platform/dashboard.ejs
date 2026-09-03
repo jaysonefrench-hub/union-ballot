@@ -1,49 +1,46 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Platform owner</p>
-<h1>Instance stats &amp; recovery</h1>
+<p class="eyebrow">Platform administration</p>
+<h1>Locals, stats &amp; recovery</h1>
 <p class="sub">Aggregate counts only — nothing on this page names a member, an email address, a
-phone number, or any local contact. This instance serves <strong>one local</strong>; if several
-locals ever report into shared infrastructure, their numbers roll up into this same shape.</p>
-<form method="post" action="/platform/logout" style="margin:0"><button class="btn small" type="submit">Sign out of platform page</button></form>
+phone number, or any local contact. Each local is a fully walled-off tenant: its committee and
+observers see only their own roster, votes, and audit chain. This page rolls their numbers up;
+it cannot open a ballot (decryption always requires the keyholders' shares, which are never
+stored) and it cannot read any roster.</p>
 
-<h2>Elections &amp; votes</h2>
+<h2>All locals — rollup</h2>
 <div class="stat-row">
-  <div class="stat"><div class="n"><%= stats.elections.total %></div><div class="l">Total votes</div></div>
-  <div class="stat"><div class="n"><%= stats.elections.completed %></div><div class="l">Completed (tallied)</div></div>
-  <div class="stat"><div class="n"><%= stats.elections.by_status.open %></div><div class="l">Open now</div></div>
-  <div class="stat"><div class="n"><%= stats.elections.by_status.closed %></div><div class="l">Closed, awaiting tally</div></div>
-  <div class="stat"><div class="n"><%= stats.elections.in_preparation %></div><div class="l">In preparation</div></div>
+  <div class="stat"><div class="n"><%= localsCount %></div><div class="l">Locals hosted</div></div>
+  <div class="stat"><div class="n"><%= rollup.elections.total %></div><div class="l">Total votes</div></div>
+  <div class="stat"><div class="n"><%= rollup.elections.completed %></div><div class="l">Completed (tallied)</div></div>
+  <div class="stat"><div class="n"><%= rollup.elections.by_status.open %></div><div class="l">Open now</div></div>
+  <div class="stat"><div class="n"><%= rollup.credentials.issued %></div><div class="l">Credentials issued</div></div>
+  <div class="stat"><div class="n"><%= rollup.ballots.sealed_stored %></div><div class="l">Sealed ballots stored</div></div>
+  <div class="stat"><div class="n"><%= rollup.roster_size %></div><div class="l">Members on rosters</div></div>
 </div>
-<table style="max-width:520px">
-<tr><th>Breakdown</th><th>Count</th></tr>
-<tr><td>Binding votes</td><td><%= stats.elections.binding %></td></tr>
-<tr><td>Test votes</td><td><%= stats.elections.test %></td></tr>
-<tr><td>Draft</td><td><%= stats.elections.by_status.draft %></td></tr>
-<tr><td>Credentials issued</td><td><%= stats.elections.by_status.credentials_issued %></td></tr>
-<tr><td>Open</td><td><%= stats.elections.by_status.open %></td></tr>
-<tr><td>Closed</td><td><%= stats.elections.by_status.closed %></td></tr>
-<tr><td>Tallied</td><td><%= stats.elections.by_status.tallied %></td></tr>
+<table style="max-width:560px">
+<tr><th>Breakdown (all locals)</th><th>Count</th></tr>
+<tr><td>Binding votes</td><td><%= rollup.elections.binding %></td></tr>
+<tr><td>Test votes</td><td><%= rollup.elections.test %></td></tr>
+<tr><td>Draft</td><td><%= rollup.elections.by_status.draft %></td></tr>
+<tr><td>Credentials issued (status)</td><td><%= rollup.elections.by_status.credentials_issued %></td></tr>
+<tr><td>Open</td><td><%= rollup.elections.by_status.open %></td></tr>
+<tr><td>Closed, awaiting tally</td><td><%= rollup.elections.by_status.closed %></td></tr>
+<tr><td>Tallied</td><td><%= rollup.elections.by_status.tallied %></td></tr>
+<tr><td>Credentials redeemed</td><td><%= rollup.credentials.redeemed %></td></tr>
+<tr><td>Credentials voided (reissues)</td><td><%= rollup.credentials.voided %></td></tr>
+<tr><td>Sealed ballots in binding votes</td><td><%= rollup.ballots.sealed_binding %></td></tr>
+<tr><td>Sealed ballots in test votes</td><td><%= rollup.ballots.sealed_test %></td></tr>
+<tr><td>Ballots counted in tallies</td><td><%= rollup.ballots.counted_in_tallies %></td></tr>
+<tr><td>Paper ballots recorded</td><td><%= rollup.ballots.paper_recorded %></td></tr>
 </table>
 
-<h2>Ballots</h2>
-<div class="stat-row">
-  <div class="stat"><div class="n"><%= stats.ballots.sealed_stored %></div><div class="l">Sealed ballots stored</div></div>
-  <div class="stat"><div class="n"><%= stats.ballots.counted_in_tallies %></div><div class="l">Counted in tallies</div></div>
-  <div class="stat"><div class="n"><%= stats.ballots.paper_recorded %></div><div class="l">Paper ballots recorded</div></div>
-</div>
-<table style="max-width:520px">
-<tr><th>Sealed ballots</th><th>Count</th></tr>
-<tr><td>In binding votes</td><td><%= stats.ballots.sealed_binding %></td></tr>
-<tr><td>In test votes</td><td><%= stats.ballots.sealed_test %></td></tr>
-</table>
-
-<h2>Turnout</h2>
+<h3>Turnout — all locals</h3>
 <p class="sub">Across votes where an eligibility snapshot exists (frozen at credential issuance).
 Overall = all voters over all eligible; average = mean of per-vote rates.</p>
 <table style="max-width:680px">
 <tr><th>Scope</th><th>Votes</th><th>Eligible</th><th>Voted</th><th>Overall</th><th>Average</th></tr>
-<% [['All', stats.turnout.all], ['Binding', stats.turnout.binding], ['Test', stats.turnout.test]].forEach(function (pair) { const t = pair[1]; %>
+<% [['All', rollup.turnout.all], ['Binding', rollup.turnout.binding], ['Test', rollup.turnout.test]].forEach(function (pair) { const t = pair[1]; %>
 <tr>
   <td><%= pair[0] %></td>
   <td><%= t.elections %></td>
@@ -55,19 +52,75 @@ Overall = all voters over all eligible; average = mean of per-vote rates.</p>
 <% }) %>
 </table>
 
-<h2>Roster</h2>
-<div class="stat-row">
-  <div class="stat"><div class="n"><%= stats.roster_size %></div><div class="l">Members on roster</div></div>
-</div>
-<p class="sub">A count only. The roster itself — names, emails, standing — is visible to the
-local's election committee, never here.</p>
+<h2>Per local</h2>
+<% if (perLocal.length === 0) { %>
+  <div class="notice">No locals yet. Create the first one below — that flow also provisions the local's first committee-admin account.</div>
+<% } else { %>
+<table>
+<tr><th>#</th><th>Local</th><th>No.</th><th>State</th><th>Roster</th><th>Votes</th><th>Tallied</th><th>Open</th><th>Credentials issued</th><th>Sealed ballots</th><th>Turnout (overall)</th></tr>
+<% perLocal.forEach(function (row) { const l = row.local, s = row.stats; %>
+<tr>
+  <td><%= l.id %></td>
+  <td><strong><%= l.name %></strong></td>
+  <td><%= l.local_number || '—' %></td>
+  <td><%= l.jurisdiction || '—' %></td>
+  <td><%= s.roster_size %></td>
+  <td><%= s.elections.total %></td>
+  <td><%= s.elections.completed %></td>
+  <td><%= s.elections.by_status.open %></td>
+  <td><%= s.credentials.issued %></td>
+  <td><%= s.ballots.sealed_stored %></td>
+  <td><%= s.turnout.all.overall_pct === null ? '—' : s.turnout.all.overall_pct + '%' %></td>
+</tr>
+<% }) %>
+</table>
+<p class="sub">Roster sizes are counts only. The rosters themselves — names, emails, standing —
+are visible to each local's own election committee, never here.</p>
+<% } %>
+
+<h2>Create a new local</h2>
+<p class="sub">Creates a fully isolated local <strong>and its very first committee-admin
+account</strong> in one step (the multi-local version of the old one-time first-run setup). The
+account belongs only to the new local — this form can never grant anyone access to an existing
+local. Hand the committee the sign-in URL, username, and password over a channel you trust; they
+add their own observer accounts and recovery emails under Accounts, and they alone manage their
+roster and votes from there.</p>
+<form method="post" action="/platform/locals" style="max-width:520px">
+  <label for="ln">Local name</label>
+  <input id="ln" type="text" name="name" required placeholder='e.g. "IAFF Local 947 — Greensboro"'>
+  <div class="row">
+    <div>
+      <label for="lno">Local number (optional)</label>
+      <input id="lno" type="text" name="local_number" placeholder="947">
+    </div>
+    <div>
+      <label for="lj">State / jurisdiction</label>
+      <select id="lj" name="jurisdiction" required>
+        <option value="">— select —</option>
+        <% jurisdictions.forEach(function (j) { %>
+          <option value="<%= j[0] %>"><%= j[1] %></option>
+        <% }) %>
+      </select>
+    </div>
+  </div>
+  <h3 style="margin-top:14px">First committee-admin account</h3>
+  <label for="an">Name (e.g., "Election Committee Chair")</label>
+  <input id="an" type="text" name="admin_display_name" required>
+  <label for="au">Username (unique across the whole platform — include the local number)</label>
+  <input id="au" type="text" name="admin_username" required autocomplete="off">
+  <label for="ap">Password (10+ characters — the committee should change it after first sign-in)</label>
+  <input id="ap" type="text" name="admin_password" minlength="10" required autocomplete="off">
+  <label for="ae">Recovery email (optional — enables the committee's self-service forgot-password flow)</label>
+  <input id="ae" type="email" name="admin_email" autocomplete="off" placeholder="committee@example.org">
+  <button class="btn primary" type="submit">Create local &amp; committee account</button>
+</form>
 
 <h2>Sealed records archives</h2>
 <p class="sub">Written automatically the moment a vote is tallied — the same records archive the
 committee can export by hand (configuration, eligibility snapshot, turnout, hashed credentials,
-<strong>encrypted</strong> ballots, results, audit log). If a local loses its login or its copy of
-the results, hand its archive back from here. No archive can open a ballot: decryption still
-requires the keyholders' shares, which are never stored.
+<strong>encrypted</strong> ballots, results, that local's audit chain). If a local loses its login
+or its copy of the results, hand its archive back from here. No archive can open a ballot:
+decryption still requires the keyholders' shares, which are never stored.
 <% if (archivesEncrypted) { %>Archives are encrypted at rest (AES-256-GCM under
 <span class="mono">BACKUP_KEY</span>); restore with <span class="mono">scripts/decrypt-backup.js</span>.<% } else { %>
 <strong>BACKUP_KEY is not configured</strong>, so archives are stored as plaintext JSON — set a
@@ -76,10 +129,11 @@ requires the keyholders' shares, which are never stored.
   <div class="notice">No archives yet. One is written automatically each time a vote is tallied.</div>
 <% } else { %>
 <table>
-<tr><th>#</th><th>Election</th><th>Title</th><th>Tallied at</th><th>Sealed ballots</th><th>Stored</th><th></th></tr>
+<tr><th>#</th><th>Local</th><th>Election</th><th>Title</th><th>Tallied at</th><th>Sealed ballots</th><th>Stored</th><th></th></tr>
 <% archives.forEach(function (a) { %>
 <tr>
   <td><%= a.id %></td>
+  <td><%= a.local_name || (a.local_id ? ('local #' + a.local_id) : '—') %></td>
   <td><%= a.election_id %></td>
   <td><%= a.election_title %></td>
   <td><%= a.tallied_at || '—' %></td>
@@ -98,10 +152,30 @@ account that is locked out<% if (smtp) { %> and cannot use the emailed
 configured on this instance, so this is the only reset path)<% } %>. The link is shown exactly
 once, works exactly once, and expires in <%= resetTtlMinutes %> minutes. The account holder
 chooses their own new password — no password is ever emailed, displayed, or stored in plaintext.
-Verify who you are talking to before generating one: this link takes over the account.</p>
+Verify who you are talking to before generating one: this link takes over the account. The
+confirmation page names the account's local so you can check you are helping the right one.</p>
 <form method="post" action="/platform/reset-link" style="max-width:420px">
   <label for="ru">Account username</label>
   <input id="ru" type="text" name="username" required autocomplete="off">
   <button class="btn" type="submit">Generate one-time reset link</button>
 </form>
+
+<h2>Whole-database backup</h2>
+<p class="sub">An encrypted snapshot of the entire instance database (AES-256-GCM under
+<span class="mono">BACKUP_KEY</span>) — every local's data, so this is a platform function, never
+a committee one. It contains <strong>no</strong> key shares and no plaintext election key, so it
+cannot be used to open ballots. Restore with <span class="mono">scripts/decrypt-backup.js</span>.
+Each local's own retention record is its per-election archive above.</p>
+<a class="btn" href="/platform/backup">Download encrypted backup</a>
+
+<h2>Platform activity</h2>
+<p class="sub">The platform audit chain (operator-level events: sign-ins, locals created,
+backups, instance-wide voter-portal security events). Each local's own chain is visible to that
+local's committee and observers, never here.</p>
+<table>
+<tr><th>#</th><th>When (UTC)</th><th>Actor</th><th>Event</th><th>Detail</th></tr>
+<% platformEvents.forEach(function (r) { %>
+<tr><td><%= r.id %></td><td class="mono"><%= r.at %></td><td><%= r.actor %></td><td class="mono"><%= r.event %></td><td><%= r.detail || '' %></td></tr>
+<% }) %>
+</table>
 <%- include('../partials/foot') %>

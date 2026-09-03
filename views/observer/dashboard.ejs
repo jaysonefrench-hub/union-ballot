@@ -1,8 +1,8 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Candidate observers — 29 U.S.C. 481(c)</p>
+<p class="eyebrow">Candidate observers — 29 U.S.C. 481(c) — <%= currentLocal.name %></p>
 <h1>Observer station</h1>
-<p class="sub">Read-only visibility into every observable part of the process. You can see who has voted (never how), configurations, counts, and the tamper-evident audit log.</p>
+<p class="sub">Read-only visibility into every observable part of <strong><%= currentLocal.name %></strong>'s process. You can see who has voted (never how), configurations, counts, and this local's tamper-evident audit chain.</p>
 
 <div class="seal-strip">
   <strong>Audit chain verification:</strong>

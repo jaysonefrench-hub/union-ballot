@@ -12,6 +12,7 @@ const bcrypt = require('bcryptjs');
 
 const { db, audit } = require('./src/db');
 const { randomHex } = require('./src/crypto');
+const { resolveLocal, platformAdminExists } = require('./src/tenant');
 const { SOURCE_HASH, SOURCE_FILE_COUNT, GIT_COMMIT, REPO_URL } = require('./src/sourcehash');
 
 /* ----- crash handlers: log the error, never the request ----- */
@@ -106,6 +107,18 @@ app.use((req, res, next) => {
   res.locals.user = req.session.user || null;
   res.locals.flash = req.session.flash || null;
   res.locals.brand = BRAND;
+  /* The signed-in committee/observer's local, shown in the header of every
+   * page so it is always unambiguous WHICH local this session manages (the
+   * same person may hold accounts at more than one local). resolveLocal
+   * re-resolves and ENFORCES it on /admin and /observe requests; this lookup
+   * is display-only. */
+  res.locals.currentLocal = null;
+  if (req.session.user) {
+    const row = db.prepare('SELECT l.* FROM locals l JOIN users u ON u.local_id=l.id WHERE u.id=?').get(req.session.user.id);
+    res.locals.currentLocal = row || null;
+  }
+  /* Platform administrator session (separate role, separate table). */
+  res.locals.platformAdmin = (req.session && req.session.platform_admin) || null;
   /* Set true only on pages that belong to a TEST election — never globally. */
   res.locals.electionIsTest = false;
   /* Deployed-code transparency: observers can compare this to an independent
@@ -128,34 +141,25 @@ function requireRole(...roles) {
   };
 }
 
-/* ----- first-run setup ----- */
-function adminExists() {
-  return !!db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
+/* ----- first-run setup (legacy path) -----
+ * Committee accounts are no longer self-claimed on first run: a local — and
+ * its first committee-admin account — is provisioned by the platform
+ * administrator (/platform). The old /setup URL survives only as a signpost
+ * so bookmarks and the previous README instructions land somewhere sensible. */
+function anyCommitteeAccountExists() {
+  return !!db.prepare('SELECT id FROM users LIMIT 1').get();
 }
 
-app.get('/setup', (req, res) => {
-  if (adminExists()) return res.redirect('/login');
-  res.render('setup', { title: 'First-run setup' });
-});
-
-app.post('/setup', (req, res) => {
-  if (adminExists()) return res.redirect('/login');
-  const { username, password, display_name } = req.body;
-  if (!username || !password || password.length < 10) {
-    flash(req, 'error', 'Choose a username and a password of at least 10 characters.');
-    return res.redirect('/setup');
-  }
-  const hash = bcrypt.hashSync(password, 12);
-  db.prepare('INSERT INTO users (username, password_hash, role, display_name) VALUES (?,?,?,?)')
-    .run(username.trim(), hash, 'admin', (display_name || username).trim());
-  audit('system', 'setup.admin_created', `Election-committee admin account "${username.trim()}" created`);
-  flash(req, 'ok', 'Administrator account created. Sign in.');
-  res.redirect('/login');
+app.all('/setup', (req, res) => {
+  if (!platformAdminExists() && !anyCommitteeAccountExists()) return res.redirect('/platform/setup');
+  return res.redirect('/login');
 });
 
 /* ----- login/logout ----- */
 app.get('/login', (req, res) => {
-  if (!adminExists()) return res.redirect('/setup');
+  /* Brand-new instance: nothing to sign in to yet — start the platform
+   * bootstrap instead (it creates the platform admin, who creates locals). */
+  if (!platformAdminExists() && !anyCommitteeAccountExists()) return res.redirect('/platform/setup');
   res.render('login', { title: 'Sign in' });
 });
 
@@ -166,20 +170,25 @@ app.post('/login', (req, res) => {
     /* The submitted username is deliberately NOT recorded: a voter who pastes a
      * ballot credential into this box would otherwise write it into the
      * permanent, observer-visible audit log. The attempt itself is the
-     * loggable event. */
-    audit('system', 'auth.failed_login', 'Failed sign-in attempt (submitted username not recorded)');
+     * loggable event. Attributed to the account's local when the username
+     * exists (its observers are entitled to see failed attempts on their own
+     * accounts); otherwise to the platform chain. */
+    audit(u ? u.local_id : null, 'system', 'auth.failed_login', 'Failed sign-in attempt (submitted username not recorded)');
     flash(req, 'error', 'Sign-in failed. Check the username and password.');
     return res.redirect('/login');
   }
-  req.session.user = { id: u.id, username: u.username, role: u.role, name: u.display_name };
-  audit(u.username, 'auth.login', `${u.role} signed in`);
+  /* local_id rides in the session for logout attribution; every scoped page
+   * re-resolves it from the database via resolveLocal. */
+  req.session.user = { id: u.id, username: u.username, role: u.role, name: u.display_name, local_id: u.local_id };
+  audit(u.local_id, u.username, 'auth.login', `${u.role} signed in`);
   res.redirect(u.role === 'admin' ? '/admin' : '/observe');
 });
 
 app.post('/logout', (req, res) => {
   const who = req.session.user ? req.session.user.username : 'unknown';
+  const localId = req.session.user ? req.session.user.local_id : null;
   req.session.destroy(() => {
-    audit(who, 'auth.logout', null);
+    audit(localId ?? null, who, 'auth.logout', null);
     res.redirect('/');
   });
 });
@@ -190,13 +199,17 @@ app.use('/', require('./src/routes/voter')({ flash }));
  * the whole point is that the person is locked out — protected by hash-only
  * single-use tokens, not sessions. */
 app.use('/', require('./src/routes/recovery')({ flash }));
-app.use('/admin', requireRole('admin'), require('./src/routes/backup')({ flash }));
-app.use('/admin', requireRole('admin'), require('./src/routes/admin')({ flash }));
-app.use('/observe', requireRole('observer', 'admin'), require('./src/routes/observer')({ flash }));
-/* Platform owner (aggregate stats + local recovery): gated inside the router
- * by PLATFORM_OWNER_KEY — deliberately NOT by requireRole. A committee or
- * observer session grants nothing here, and the platform owner needs no
- * committee account. 404s unless the key is configured. */
+/* Committee/observer routes: role check first, then resolveLocal pins the
+ * request to the signed-in account's ONE local — every query inside these
+ * routers is scoped to req.localId. The whole-database backup deliberately
+ * no longer lives under /admin: it spans every local, so it belongs to the
+ * platform administrator (src/routes/platform.js). */
+app.use('/admin', requireRole('admin'), resolveLocal, require('./src/routes/admin')({ flash }));
+app.use('/observe', requireRole('observer', 'admin'), resolveLocal, require('./src/routes/observer')({ flash }));
+/* Platform administration (per-local aggregate stats, local creation,
+ * archives, recovery): authenticated by its own platform_users accounts —
+ * deliberately NOT by requireRole. A committee or observer session grants
+ * nothing here, and a platform admin holds no committee account. */
 app.use('/platform', require('./src/routes/platform')({ flash }));
 
 app.use((req, res) => res.status(404).render('error', { title: 'Not found', message: 'That page does not exist.' }));
@@ -239,7 +252,11 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   }
 
   try {
-    audit('system', 'error', signedIn
+    /* Attribute the entry to the signed-in account's local chain when there
+     * is one; anonymous/voter-facing and platform errors go to the platform
+     * chain. Never a local id derived from any submitted value. */
+    const errLocalId = req.localId ?? (req.session && req.session.user ? req.session.user.local_id : null) ?? null;
+    audit(errLocalId, 'system', 'error', signedIn
       ? `${req.method} ${routePath} — ${safeMsg}`
       : `${req.method} ${routePath} — detail withheld (voter-facing route)`);
   } catch (_) {
@@ -247,8 +264,11 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   }
 
   if (res.headersSent) return;
-  res.status(500).render('error', {
-    title: 'Something went wrong',
+  /* Tenant-scoped fetches raise status 404: a guessed id from another local
+   * renders exactly like an id that never existed. */
+  const status = (err && err.status) === 404 ? 404 : 500;
+  res.status(status).render('error', {
+    title: status === 404 ? 'Not found' : 'Something went wrong',
     message: (err && err.publicMessage) || 'The action could not be completed. The error was recorded in the audit log.',
   });
 });
@@ -259,7 +279,7 @@ if (require.main === module) {
     console.log(`Union Ballot running on http://localhost:${PORT}`);
     console.log(`Source fingerprint: ${SOURCE_HASH} (${SOURCE_FILE_COUNT} files)${GIT_COMMIT ? ' | commit ' + GIT_COMMIT.slice(0, 12) : ''}`);
     if (BRAND.demo) console.log('DEMO MODE is on. Do not load a real roster into this instance.');
-    if (!adminExists()) console.log(`First run: visit http://localhost:${PORT}/setup to create the election-committee admin account.`);
+    if (!platformAdminExists()) console.log(`First run: visit http://localhost:${PORT}/platform/setup to create the platform administrator, then create your first local from /platform.`);
   });
 }
 module.exports = app;

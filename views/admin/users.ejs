@@ -1,15 +1,19 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Accounts</p>
+<p class="eyebrow">Accounts — <%= currentLocal.name %></p>
 <h1>Committee &amp; observer accounts</h1>
-<p class="sub">Every candidate has the right to an observer. Observer accounts are read-only: turnout, configuration, audit log, results — never ballots, never credentials.</p>
+<p class="sub">Accounts created here belong to <strong><%= currentLocal.name %></strong> and can see
+only this local's roster, votes, and audit chain. Every candidate has the right to an observer.
+Observer accounts are read-only: turnout, configuration, audit log, results — never ballots, never
+credentials. Usernames are unique across the whole platform, so include your local number if a
+name is taken.</p>
 <h2>Create account</h2>
 <form method="post" action="/admin/users" style="max-width:460px">
   <label>Display name</label><input type="text" name="display_name" required placeholder="Observer for Candidate Smith">
   <label>Username</label><input type="text" name="username" required>
   <label>Password (10+ characters)</label><input type="text" name="password" minlength="10" required>
   <label>Recovery email (optional — enables the forgot-password flow)</label>
-  <input type="email" name="email" autocomplete="off" placeholder="chair@example.org">
+  <input type="email" name="email" autocomplete="off" placeholder="committee@example.org">
   <label>Role</label>
   <select name="role"><option value="observer">Observer (read-only)</option><option value="admin">Administrator</option></select>
   <button class="btn" type="submit">Create</button>
