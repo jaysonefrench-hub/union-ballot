@@ -110,6 +110,15 @@ function listCredentialPaths(election) {
   return { paper, electronic, unverified, invalidSyntax, skipVerify };
 }
 
+/** This member's entry in the election's FROZEN eligibility snapshot, or
+ * null. The snapshot fixes both eligibility and voting method (electronic vs
+ * paper) at credential issuance; the paper and reissue routes must consult
+ * it, never the live roster. */
+function snapshotEntry(election, memberId) {
+  return JSON.parse(election.eligibility_snapshot || '[]')
+    .find((s) => Number(s.member_id) === Number(memberId)) || null;
+}
+
 module.exports = function adminRoutes({ flash }) {
   const router = express.Router();
 
@@ -396,11 +405,18 @@ module.exports = function adminRoutes({ flash }) {
     const eligibleMembers = eligible.map((s) => {
       /* Snapshot ids are this election's own, but keep the local check anyway:
        * a name lookup must never cross into another local's roster. */
-      const m = db.prepare('SELECT id, name FROM members WHERE id=? AND local_id=?').get(s.member_id, req.localId);
-      return { member_id: s.member_id, name: m ? m.name : `member #${s.member_id}`, method: s.method };
+      const m = db.prepare('SELECT id, name, good_standing FROM members WHERE id=? AND local_id=?').get(s.member_id, req.localId);
+      return { member_id: s.member_id, name: m ? m.name : `member #${s.member_id}`, method: s.method, good_standing: m ? Number(m.good_standing) : 0 };
     });
     const paths = listCredentialPaths(e);
-    const paperMembers = paths.paper;
+    /* The paper-receipt list comes from the FROZEN eligibility snapshot
+     * (method 'paper'), never the live roster: a member added or re-flagged
+     * after credentials were issued is not eligible on this election's paper
+     * path. Good standing is still read live so a suspended member drops off.
+     * The server-side check in /paper-received enforces the same rule. */
+    const paperMembers = eligibleMembers
+      .filter((s) => s.method === 'paper' && s.good_standing === 1)
+      .map((s) => ({ id: s.member_id, name: s.name }));
     /* Members who would block issuance (unverified on a vote that still
      * requires magic-link confirm). Empty when TEST + demo_skip is on. */
     const unverifiedMembers = paths.unverified;
@@ -542,6 +558,39 @@ module.exports = function adminRoutes({ flash }) {
       const member = tenant.getMember(req.localId, memberId);
       if (!member || !['credentials_issued', 'open'].includes(e.status)) { flash(req, 'error', 'Reissue is only possible after credentials are issued and before the vote closes.'); return res.redirect(`/admin/elections/${e.id}`); }
 
+      /*
+       * FROZEN ELIGIBILITY (server side, mirroring the paper route): a
+       * credential may only be reissued to a member recorded on the
+       * ELECTRONIC path in this election's frozen eligibility snapshot and
+       * still in good standing. The page hides everyone else, but hiding is
+       * not enforcement; a posted id must be rejected here.
+       */
+      const snap = snapshotEntry(e, memberId);
+      if (!snap || snap.method !== 'electronic') {
+        audit(req.localId, req.session.user.username, 'election.reissue_blocked',
+          `Election #${e.id}: reissue for member #${memberId} blocked: ${snap ? 'the member is on the paper-ballot path in the frozen eligibility snapshot' : 'the member is not in the frozen eligibility snapshot for this election'}`);
+        flash(req, 'error', snap
+          ? `${member.name} is on the paper-ballot path for this vote and cannot be issued an electronic credential.`
+          : `${member.name} is not in the frozen eligibility list for this vote (eligibility was fixed when credentials were issued), so no credential can be issued.`);
+        return res.redirect(`/admin/elections/${e.id}`);
+      }
+      if (Number(member.good_standing) !== 1) {
+        audit(req.localId, req.session.user.username, 'election.reissue_blocked',
+          `Election #${e.id}: reissue for member #${memberId} blocked: the member is not in good standing`);
+        flash(req, 'error', `${member.name} is not in good standing; no replacement credential was issued.`);
+        return res.redirect(`/admin/elections/${e.id}`);
+      }
+      /* A member already on the turnout list (for example a recorded paper
+       * ballot) has voted; issuing them a fresh electronic credential would
+       * open a second vote. */
+      const alreadyVoted = db.prepare('SELECT method FROM turnout WHERE election_id=? AND member_id=?').get(e.id, memberId);
+      if (alreadyVoted) {
+        audit(req.localId, req.session.user.username, 'election.reissue_blocked',
+          `Election #${e.id}: reissue for member #${memberId} blocked: the member is already recorded as having voted (${alreadyVoted.method})`);
+        flash(req, 'error', `${member.name} is already recorded as having voted (${alreadyVoted.method === 'paper' ? 'paper ballot received' : 'electronically'}); no replacement credential can be issued. If the member disputes this, treat it as a security incident.`);
+        return res.redirect(`/admin/elections/${e.id}`);
+      }
+
       const reissueKey = getReissueKey();
       const rows = db.prepare('SELECT * FROM credentials WHERE election_id=? AND voided=0').all(e.id);
       const own = rows.find((c) => { try { return Number(aesDecrypt(c.member_ref, reissueKey)) === memberId; } catch { return false; } });
@@ -637,13 +686,84 @@ module.exports = function adminRoutes({ flash }) {
     if (!['open', 'closed'].includes(e.status)) { flash(req, 'error', 'Paper ballots can be recorded while the vote is open or closed (before tally).'); return res.redirect(`/admin/elections/${e.id}`); }
     /* The member must belong to this local — a foreign id must never land on
      * this election's turnout list. */
-    if (!tenant.getMember(req.localId, memberId)) {
+    const member = tenant.getMember(req.localId, memberId);
+    if (!member) {
       flash(req, 'error', 'That member is not on this local\u2019s roster; no paper ballot was recorded.');
       return res.redirect(`/admin/elections/${e.id}`);
     }
-    db.prepare('INSERT OR IGNORE INTO turnout (election_id, member_id, voted_on, method) VALUES (?,?,date(\'now\'),\'paper\')').run(e.id, memberId);
-    audit(req.localId, req.session.user.username, 'election.paper_ballot_received', `Election #${e.id}: a sealed paper ballot was logged as received (member marked as voted)`);
-    flash(req, 'ok', 'Paper ballot receipt recorded. Count paper ballots with observers present and add them to the electronic results.');
+
+    /*
+     * FROZEN ELIGIBILITY: a paper ballot is accepted only from a member
+     * recorded on the PAPER path in this election's eligibility snapshot
+     * (frozen at credential issuance) who is still in good standing. The
+     * live roster is deliberately not consulted for eligibility: a member
+     * added or re-flagged after the freeze is not eligible on this path,
+     * and a member issued an electronic credential uses void-and-reissue.
+     */
+    const snap = snapshotEntry(e, memberId);
+    if (!snap || snap.method !== 'paper') {
+      audit(req.localId, req.session.user.username, 'election.paper_ballot_refused',
+        `Election #${e.id}: paper ballot for member #${memberId} refused: ${snap ? 'the member is on the electronic path in the frozen eligibility snapshot' : 'the member is not in the frozen eligibility snapshot for this election'}`);
+      flash(req, 'error', snap
+        ? `${member.name} was issued an electronic credential for this vote and is not on the paper-ballot list. No paper ballot was recorded. If their credential was lost, use void and reissue instead.`
+        : `${member.name} is not in the frozen eligibility list for this vote (eligibility was fixed when credentials were issued). No paper ballot was recorded.`);
+      return res.redirect(`/admin/elections/${e.id}`);
+    }
+    if (Number(member.good_standing) !== 1) {
+      audit(req.localId, req.session.user.username, 'election.paper_ballot_refused',
+        `Election #${e.id}: paper ballot for member #${memberId} refused: the member is not in good standing`);
+      flash(req, 'error', `${member.name} is not in good standing. No paper ballot was recorded.`);
+      return res.redirect(`/admin/elections/${e.id}`);
+    }
+
+    /* Any live electronic credential held by this member (none is issued on
+     * the paper path, but one can exist in data predating the frozen-path
+     * enforcement, for example an old reissue). Same lookup as /reissue.
+     * Skipped entirely when no decryptable credential exists, so a purged
+     * reissue map or a paper-only election never needs the reissue key. */
+    let ownCredential = null;
+    const liveCreds = db.prepare("SELECT id, member_ref, redeemed FROM credentials WHERE election_id=? AND voided=0 AND member_ref<>''").all(e.id);
+    if (liveCreds.length > 0) {
+      const reissueKey = getReissueKey();
+      ownCredential = liveCreds.find((c) => { try { return Number(aesDecrypt(c.member_ref, reissueKey)) === memberId; } catch { return false; } }) || null;
+    }
+
+    /*
+     * DOUBLE-VOTE GUARD: a member already recorded as having voted must be
+     * refused LOUDLY. The old INSERT OR IGNORE silently skipped the write
+     * and still told the committee "recorded", which would have let a paper
+     * ballot from a member who already voted electronically be hand-counted
+     * on top of their electronic ballot.
+     */
+    const already = db.prepare('SELECT method FROM turnout WHERE election_id=? AND member_id=?').get(e.id, memberId);
+    if ((already && already.method === 'electronic') || (ownCredential && ownCredential.redeemed)) {
+      audit(req.localId, req.session.user.username, 'election.paper_ballot_refused',
+        `Election #${e.id}: paper ballot for member #${memberId} refused: the member already voted electronically. This paper ballot must NOT be counted.`);
+      flash(req, 'error', `${member.name} already voted electronically in this vote: do not count this paper ballot. No paper receipt was recorded. If the member disputes having voted, treat this as a security incident and check the audit log.`);
+      return res.redirect(`/admin/elections/${e.id}`);
+    }
+    if (already) {
+      audit(req.localId, req.session.user.username, 'election.paper_ballot_refused',
+        `Election #${e.id}: paper ballot for member #${memberId} refused: a paper ballot from this member was already recorded. A second paper ballot must NOT be counted.`);
+      flash(req, 'error', `A paper ballot from ${member.name} was already recorded for this vote: do not count a second paper ballot from this member.`);
+      return res.redirect(`/admin/elections/${e.id}`);
+    }
+
+    /*
+     * Receipt and credential voiding are ONE transaction: the member is
+     * marked as voted and loses any unused electronic credential atomically,
+     * so no ordering of paper receipt and online casting can produce two
+     * counted ballots. The turnout INSERT is plain (never OR IGNORE): the
+     * guard above already refused an existing row, so a conflict here must
+     * roll the whole receipt back rather than pass silently.
+     */
+    db.transaction(() => {
+      if (ownCredential) db.prepare('UPDATE credentials SET voided=1 WHERE id=? AND redeemed=0').run(ownCredential.id);
+      db.prepare('INSERT INTO turnout (election_id, member_id, voted_on, method) VALUES (?,?,date(\'now\'),\'paper\')').run(e.id, memberId);
+    })();
+    audit(req.localId, req.session.user.username, 'election.paper_ballot_received',
+      `Election #${e.id}: a sealed paper ballot was logged as received (member marked as voted${ownCredential ? '; the member\u2019s unused electronic credential was voided in the same transaction' : ''})`);
+    flash(req, 'ok', `Paper ballot receipt recorded.${ownCredential ? ` ${member.name}\u2019s unused electronic credential was voided and can no longer cast a ballot.` : ''} Count paper ballots with observers present and add them to the electronic results.`);
     res.redirect(`/admin/elections/${e.id}`);
   });
 
