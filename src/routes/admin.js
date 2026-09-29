@@ -23,7 +23,7 @@ const { db, audit, getReissueKey, purgeReissueMap } = require('../db');
 const {
   generateElectionKeys, combineShares, decryptBallot,
   generateCredential, hashCredential, aesEncrypt, aesDecrypt, randomHex, secureShuffle,
-  generateVerifyToken, hashVerifyToken,
+  generateVerifyToken, hashVerifyToken, zeroize,
 } = require('../crypto');
 const { smtpConfigured, sendCredentialEmail, sendVerificationEmail } = require('../mailer');
 const { checkEmailSyntax } = require('../email-syntax');
@@ -841,6 +841,10 @@ module.exports = function adminRoutes({ flash }) {
       for (const row of shuffled) {
         try { ballots.push(decryptBallot(row.payload, privateKey)); } catch { failed++; }
       }
+      /* Decryption was the key's only job. Wipe the reconstructed private
+       * key buffer NOW, per the combineShares() caller contract, before any
+       * counting, rendering, or early return can widen its lifetime. */
+      zeroize(privateKey);
       if (failed > 0 && ballots.length === 0) {
         audit(req.localId, req.session.user.username, 'tally.decrypt_failed', `Election #${e.id}: ballots failed to decrypt — wrong shares or tampering`);
         flash(req, 'error', 'The ballots did not decrypt. Verify each keyholder pasted their full share for THIS election.');
