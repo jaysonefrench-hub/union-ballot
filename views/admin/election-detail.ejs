@@ -119,7 +119,7 @@
     <div style="max-width:320px">
       <label>Member</label>
       <select name="member_id">
-        <% eligibleMembers.filter(function (s) { return s.method === 'electronic'; }).forEach(function (s) { %>
+        <% eligibleMembers.filter(function (s) { return s.method === 'electronic' && s.good_standing === 1; }).forEach(function (s) { %>
           <option value="<%= s.member_id %>"><%= s.name %></option>
         <% }) %>
       </select>

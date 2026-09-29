@@ -191,10 +191,33 @@ module.exports = function voterRoutes({ flash }) {
       const reissueKey = getReissueKey();
       const memberId = Number(aesDecrypt(cred.member_ref, reissueKey));
 
+      /*
+       * ALREADY-VOTED GUARD: a member already on the turnout list (most
+       * importantly, a recorded paper ballot) must not cast electronically
+       * too. Refused BEFORE anything is written: the credential is not
+       * redeemed and no ballot is stored, so nothing here can ever link a
+       * ballot to a member. The audit entry names the election only, never
+       * the member.
+       */
+      const alreadyVoted = db.prepare('SELECT method FROM turnout WHERE election_id=? AND member_id=?').get(election.id, memberId);
+      if (alreadyVoted) {
+        audit(election.local_id, 'voter-portal', 'vote.cast_refused_already_voted',
+          `A ballot cast was refused in election #${election.id} ("${election.title}"): the presented credential belongs to a member already recorded as having voted (${alreadyVoted.method}). No ballot was recorded.`);
+        flash(req, 'error', alreadyVoted.method === 'paper'
+          ? 'Our records show a paper ballot has already been received from you for this vote, so an electronic ballot cannot also be cast. No ballot was recorded. If you did not submit a paper ballot, contact the election committee immediately.'
+          : 'Our records show you have already voted in this election. No second ballot was recorded. If you did not vote, contact the election committee immediately.');
+        return res.redirect('/');
+      }
+
       const cast = db.transaction(() => {
         const upd = db.prepare('UPDATE credentials SET redeemed=1, redeemed_on=date(\'now\') WHERE id=? AND redeemed=0').run(cred.id);
         if (upd.changes !== 1) throw Object.assign(new Error('double-spend race'), { publicMessage: 'This credential was just used. No second ballot was recorded.' });
-        db.prepare('INSERT OR IGNORE INTO turnout (election_id, member_id, voted_on, method) VALUES (?,?,date(\'now\'),\'electronic\')')
+        /* Plain INSERT (never OR IGNORE): the guard above already refused a
+         * member with an existing turnout row, so a conflict here is an
+         * inconsistency that must roll back the whole cast. The old OR IGNORE
+         * silently dropped the turnout write while the ballot still landed,
+         * which is exactly how a paper-then-online double vote slipped in. */
+        db.prepare('INSERT INTO turnout (election_id, member_id, voted_on, method) VALUES (?,?,date(\'now\'),\'electronic\')')
           .run(election.id, memberId);
         /*
          * The ballot: encrypted to the election public key, stored under a

@@ -12,6 +12,9 @@
 </div>
 <% results.races.forEach(function (race) { %>
   <h3><%= race.title %> <span class="sub" style="font-weight:400">(<%= race.seats %> seat<%= race.seats > 1 ? 's' : '' %>, <%= race.threshold.replace('_',' ') %> · <%= race.ballots_in_race %> ballots voted in this race)</span></h3>
+  <% (race.tie_flags || []).forEach(function (t) { %>
+    <div class="notice warn"><strong><%= t %></strong></div>
+  <% }) %>
   <% (race.secrecy_warnings || []).forEach(function (w) { %>
     <div class="notice warn"><strong>Ballot-secrecy notice:</strong> <%= w %></div>
   <% }) %>
@@ -26,11 +29,12 @@
       </tr>
     <% }) %>
   </table>
-  <% if (race.runoff_required) { %>
-    <div class="notice warn"><strong>No majority — runoff required</strong> between
-      <%= race.runoff_between.join(' and ') %> (IAFF sample CBL Art. on elections: runoff between the two candidates receiving the most votes).</div>
+  <% if (race.runoff_required) { var rSeats = race.runoff_seats || 1; var rNames = race.runoff_between || []; %>
+    <div class="notice warn"><strong>No majority for <%= rSeats %> seat<%= rSeats > 1 ? 's' : '' %>, runoff required</strong>
+      <%= rNames.length === 2 ? 'between' : 'among' %> <%= rNames.length === 2 ? rNames.join(' and ') : rNames.join(', ') %>
+      (<%= race.seats > 1 ? 'top non-winning candidates, up to two per unfilled seat, ties at the cutoff included' : 'IAFF sample CBL Art. on elections: runoff between the two candidates receiving the most votes' %>).</div>
   <% } %>
-  <% if (race.threshold === 'two_thirds' && race.winners.length === 0) { %>
+  <% if (race.threshold === 'two_thirds' && race.winners.length === 0 && !(race.tie_flags || []).length) { %>
     <div class="notice"><strong>Not adopted</strong> — the leading option did not reach two-thirds of ballots cast on the question.</div>
   <% } %>
 <% }) %>
