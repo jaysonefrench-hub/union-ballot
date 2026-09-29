@@ -119,6 +119,36 @@ function snapshotEntry(election, memberId) {
     .find((s) => Number(s.member_id) === Number(memberId)) || null;
 }
 
+/**
+ * Take the top `seatCount` entries from `qualified` (candidates that meet the
+ * race's threshold, already sorted by votes descending) WITHOUT ever breaking
+ * a tie by sort order. When the candidates at the final winning position have
+ * equal votes, none of the tied candidates is declared for the contested
+ * seat(s); the tie is returned so the caller can flag it for the committee to
+ * resolve per the local's bylaws.
+ */
+function pickWinnersWithTies(qualified, seatCount) {
+  if (qualified.length <= seatCount) return { winners: qualified.slice(), tie: null };
+  const cutoff = qualified[seatCount - 1].votes;
+  if (qualified[seatCount].votes === cutoff) {
+    const sure = qualified.filter((s) => s.votes > cutoff);
+    const tied = qualified.filter((s) => s.votes === cutoff);
+    return { winners: sure, tie: { firstSeat: sure.length + 1, lastSeat: seatCount, between: tied.map((s) => s.name) } };
+  }
+  return { winners: qualified.slice(0, seatCount), tie: null };
+}
+
+/** "X and Y" / "X, Y and Z" for tie and runoff messages. */
+function joinNames(names) {
+  if (names.length <= 1) return names.join('');
+  return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+/** "seat 2" / "seats 2 to 3" for tie messages. */
+function seatLabel(firstSeat, lastSeat) {
+  return firstSeat === lastSeat ? `seat ${lastSeat}` : `seats ${firstSeat} to ${lastSeat}`;
+}
+
 module.exports = function adminRoutes({ flash }) {
   const router = express.Router();
 
@@ -852,23 +882,65 @@ module.exports = function adminRoutes({ flash }) {
          *  - majority, 1 seat (IAFF sample CBL): winner needs a majority of
          *    ballots cast in the race; otherwise runoff between top two.
          *  - majority, multi-seat: majority = totalVotes / (2 x seats)
-         *    (the standard union election-manual method).
+         *    (the standard union election-manual method). Seats no candidate
+         *    reached a majority for go to a runoff among the top non-winning
+         *    candidates, up to two per unfilled seat (IAFF-style), with ties
+         *    at that cutoff included.
          *  - two_thirds (bylaw amendments): top option needs >= 2/3 of
          *    ballots cast in the question.
          *  - plurality: top N win.
+         *
+         * TIE SAFETY (all modes): a tie at the winning cutoff (the last
+         * seat, or the runoff cutoff) is NEVER broken silently by sort
+         * order. The tied candidates are excluded from `winners`, and a
+         * plain-language flag is recorded on the result itself, so it also
+         * shows on the results pages and lands in the records archive, for
+         * the committee to resolve per the local's bylaws.
          */
-        let winners = []; let runoffRequired = false; let runoffBetween = [];
+        let winners = []; let runoffRequired = false; let runoffBetween = []; let runoffSeats = 0;
+        const tieFlags = [];
         if (race.threshold === 'plurality') {
-          winners = standings.slice(0, race.seats).filter((s) => s.votes > 0).map((s) => s.name);
+          const qualified = standings.filter((s) => s.votes > 0);
+          const picked = pickWinnersWithTies(qualified, race.seats);
+          winners = picked.winners.map((s) => s.name);
+          if (picked.tie) {
+            tieFlags.push(`Tie for ${seatLabel(picked.tie.firstSeat, picked.tie.lastSeat)} between ${joinNames(picked.tie.between)}, resolve per your bylaws.`);
+          }
         } else if (race.threshold === 'two_thirds') {
-          const top = standings[0];
-          if (top && ballotsInRace > 0 && top.votes >= (2 / 3) * ballotsInRace) winners = [top.name];
+          const qualified = ballotsInRace > 0 ? standings.filter((s) => s.votes >= (2 / 3) * ballotsInRace) : [];
+          const picked = pickWinnersWithTies(qualified, 1);
+          winners = picked.winners.map((s) => s.name);
+          if (picked.tie) {
+            tieFlags.push(`Tie at the two-thirds threshold between ${joinNames(picked.tie.between)}, resolve per your bylaws.`);
+          }
         } else { /* majority */
           const needed = race.seats === 1 ? ballotsInRace / 2 : totalVotes / (2 * race.seats);
-          winners = standings.filter((s) => s.votes > needed).slice(0, race.seats).map((s) => s.name);
-          if (winners.length < race.seats && standings.length > 1) {
+          const qualified = standings.filter((s) => s.votes > needed);
+          const picked = pickWinnersWithTies(qualified, race.seats);
+          winners = picked.winners.map((s) => s.name);
+          if (picked.tie) {
+            tieFlags.push(`Tie for ${seatLabel(picked.tie.firstSeat, picked.tie.lastSeat)} between ${joinNames(picked.tie.between)}, resolve per your bylaws.`);
+          }
+          /* A runoff covers only seats NO candidate reached a majority for.
+           * A seat contested by a tie between majority holders is resolved
+           * per bylaws (flagged above), not by a runoff. */
+          const unfilled = Math.max(0, race.seats - qualified.length);
+          const winnerIds = new Set(picked.winners.map((s) => s.id));
+          const pool = standings.filter((s) => !winnerIds.has(s.id));
+          if (unfilled > 0 && standings.length > 1 && pool.length > 0) {
             runoffRequired = true;
-            runoffBetween = standings.slice(0, 2).map((s) => s.name);
+            runoffSeats = unfilled;
+            /* Runoff field: top non-winning candidates, up to two per
+             * unfilled seat (single seat therefore keeps its top-two rule),
+             * plus everyone tied at that cutoff. */
+            const cap = Math.min(2 * unfilled, pool.length);
+            let take = cap;
+            while (take < pool.length && pool[take].votes === pool[cap - 1].votes) take++;
+            runoffBetween = pool.slice(0, take).map((s) => s.name);
+            if (take > cap) {
+              const tiedAtCutoff = pool.filter((s) => s.votes === pool[cap - 1].votes).map((s) => s.name);
+              tieFlags.push(`Tie at the runoff cutoff between ${joinNames(tiedAtCutoff)}; all tied candidates are included in the runoff, resolve per your bylaws.`);
+            }
           }
         }
         /*
@@ -893,6 +965,7 @@ module.exports = function adminRoutes({ flash }) {
           title: race.title, seats: race.seats, threshold: race.threshold,
           ballots_in_race: ballotsInRace, total_votes: totalVotes,
           standings, winners, runoff_required: runoffRequired, runoff_between: runoffBetween,
+          runoff_seats: runoffSeats, tie_flags: tieFlags,
           secrecy_warnings: secrecyWarnings,
         });
       }
