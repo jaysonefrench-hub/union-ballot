@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "smoke": "node scripts/mailer-mime-test.js && node scripts/smoke-test.js"
+    "smoke": "node scripts/mailer-mime-test.js && node scripts/smoke-test.js",
+    "test:regressions": "node scripts/regression-test.js",
+    "test": "npm run smoke && npm run test:regressions"
   },
   "engines": { "node": ">=18" },
   "dependencies": {
