@@ -54,17 +54,6 @@
     variance box is checked or the vote is marked as a test election.</p>
   </div>
 
-  <div class="notice warn" id="iaffApprovalNotice">
-    <strong>IAFF Legal Department approval required.</strong> Per the IAFF <em>Best Practices and
-    Model Rules</em>, matters requiring a secret ballot under applicable law or the IAFF
-    Constitution — officer elections, delegate elections, and dues rate adjustments — default to
-    in-person or mail ballot. Before using electronic voting for these, your Local must obtain
-    approval of the voting platform and procedures from the IAFF Legal Department. Record that
-    approval below (or mark this vote as a test election for observer verification).
-    <label for="iaffApproval">IAFF Legal Department approval — date and reference</label>
-    <input id="iaffApproval" type="text" name="iaff_legal_approval" placeholder="e.g., Approved by IAFF Legal Dept, letter dated 2026-06-01, ref. L-1234">
-  </div>
-
   <div class="row">
     <div>
       <label for="notice">Written notice sent to members on (IAFF: at least 15 days before the election)</label>
@@ -139,9 +128,6 @@
     wrap.appendChild(d);
   }
   document.getElementById('addRace').addEventListener('click', function () { addRace(); });
-  var SECRET_KINDS = ['officer_election', 'delegate_election', 'dues_assessment'];
-  var approvalNotice = document.getElementById('iaffApprovalNotice');
-  function syncApproval(kind) { approvalNotice.style.display = SECRET_KINDS.indexOf(kind) >= 0 ? '' : 'none'; }
 
   /* Florida PERC ratification hard stop (mirrors the server-side gate, which
    * enforces it regardless of what this script does). */
@@ -171,10 +157,8 @@
   percAck.addEventListener('change', syncPerc);
   testEl.addEventListener('change', syncPerc);
 
-  syncApproval(kindEl.value);
   syncPerc();
   document.getElementById('kind').addEventListener('change', function () {
-    syncApproval(this.value);
     syncPerc();
     if (wrap.children.length === 0 || (wrap.children.length === 1 && !wrap.querySelector('input[name=race_title]').value)) {
       wrap.innerHTML = ''; n = 0;

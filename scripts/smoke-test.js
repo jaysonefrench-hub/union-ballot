@@ -2,7 +2,8 @@
  * scripts/smoke-test.js — Full end-to-end election against the live server.
  * Verifies: platform bootstrap (PLATFORM_OWNER_KEY-gated /platform/setup,
  * account sign-in) → create Local A + its first committee admin → roster →
- * create (with IAFF approval gate) → key ceremony → credentials → open →
+ * create (binding officer election with NO approval reference; IAFF Legal
+ * approval is handled outside the app) → key ceremony → credentials → open →
  * 6 ballots cast → close → tally with 3-of-5 shares → majority/runoff math →
  * anonymity properties of stored data → roster-import email-syntax gate
  * (report of rejected rows) → member-edit email gate → automatic sealed
@@ -163,15 +164,7 @@ function decryptSealed(buf, keyHex) {
     assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM members WHERE email IS NOT NULL AND email_verified=1").get().n, 0,
       'imported members start with unverified emails');
 
-    /* 3. IAFF approval gate: officer election WITHOUT approval must be rejected */
-    r = await req('POST', '/admin/elections/new', {
-      title: 'Should Fail', kind: 'officer_election', jurisdiction: 'OH',
-      race_title: 'President', race_seats: '1', race_threshold: 'majority', race_candidates: 'X\nY',
-      key_shares_total: '5', key_threshold: '3', keyholders: '',
-    }, chairJar);
-    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM elections').get().n, 0, 'approval gate blocks unapproved officer election');
-
-    /* 3b. Jurisdiction is required */
+    /* 3. Jurisdiction is required */
     r = await req('POST', '/admin/elections/new', {
       title: 'No Jurisdiction', kind: 'other', jurisdiction: '',
       race_title: 'Q', race_seats: '1', race_threshold: 'majority', race_candidates: 'Yes\nNo',
@@ -179,10 +172,12 @@ function decryptSealed(buf, keyHex) {
     }, chairJar);
     assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM elections').get().n, 0, 'missing jurisdiction blocks creation');
 
-    /* 4. Create officer election WITH recorded approval; capture key shares */
+    /* 4. Create a BINDING officer election with NO approval reference and
+     * capture the key shares. IAFF Legal Department approval is handled
+     * outside the app: the form has no approval field and the server
+     * imposes no approval requirement on creation. */
     r = await req('POST', '/admin/elections/new', {
       title: '2026 Officer Election', kind: 'officer_election', jurisdiction: 'OH',
-      iaff_legal_approval: 'IAFF Legal Dept letter 2026-06-01 ref L-1234',
       notice_sent_on: '2026-06-20',
       race_title: ['President', 'Shall dues increase $5/mo?'],
       race_seats: ['1', '1'],
@@ -191,10 +186,14 @@ function decryptSealed(buf, keyHex) {
       key_shares_total: '5', key_threshold: '3',
       keyholders: 'Rep Smith\nRep Jones\nRep Rivera\nNeutral 1\nNeutral 2',
     }, chairJar);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM elections').get().n, 1,
+      'binding officer election created with no approval reference');
     const shares = [...r.text.matchAll(/SHARE-\d+-[0-9a-f]+/g)].map((m) => m[0]);
     assert.strictEqual(shares.length, 5, 'five key shares displayed once');
     const eid = db.prepare('SELECT id FROM elections ORDER BY id DESC LIMIT 1').get().id;
     assert.strictEqual(db.prepare('SELECT local_id FROM elections WHERE id=?').get(eid).local_id, localA.id, 'election belongs to Local A');
+    assert.strictEqual(db.prepare('SELECT iaff_legal_approval FROM elections WHERE id=?').get(eid).iaff_legal_approval, null,
+      'no approval value stored (legacy column stays NULL)');
 
     /* 4b. Credential issuance must be BLOCKED while electronic-path emails are unverified */
     r = await req('POST', `/admin/elections/${eid}/issue-credentials`, {}, chairJar);
@@ -364,11 +363,15 @@ function decryptSealed(buf, keyHex) {
     assert.strictEqual(flTest.is_test, 1);
     assert.strictEqual(flTest.demo_skip_email_verify, 1, 'new TEST elections default demo_skip_email_verify ON');
 
-    /* 13d. FL NON-ratification votes are NOT blocked (bylaws, officer election) */
+    /* 13d. FL NON-ratification votes are NOT blocked (bylaws, officer election).
+     * The officer election posts the RETIRED iaff_legal_approval field, as a
+     * stale bookmarked form might: it must be ignored, never stored. */
     await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL Bylaw Amendment', kind: 'bylaw_amendment', jurisdiction: 'FL' }, chairJar);
     assert.strictEqual(electionCount(), n0 + 3, 'FL bylaw amendment not blocked');
     await req('POST', '/admin/elections/new', { ...baseVote, title: 'FL Officer Election', kind: 'officer_election', jurisdiction: 'FL', iaff_legal_approval: 'IAFF Legal Dept letter 2026-06-01' }, chairJar);
     assert.strictEqual(electionCount(), n0 + 4, 'FL officer election not blocked by PERC gate');
+    assert.strictEqual(db.prepare("SELECT iaff_legal_approval FROM elections WHERE title='FL Officer Election'").get().iaff_legal_approval, null,
+      'posted legacy approval field is ignored and never stored');
 
     /* 13e. Non-FL ratification → not blocked */
     await req('POST', '/admin/elections/new', { ...baseVote, title: 'OH TA Ratification', kind: 'contract_ratification', jurisdiction: 'OH' }, chairJar);
@@ -886,6 +889,20 @@ function decryptSealed(buf, keyHex) {
           out.migratedEventCount = db.prepare("SELECT COUNT(*) n FROM audit_log WHERE event='platform.migrated_to_locals'").get().n;
           out.chainLocal = verifyAuditChain(out.local.id);
           out.chainPlatform = verifyAuditChain(null);
+          /* Backward compatibility: the legacy election row carries a stored
+           * iaff_legal_approval value. Its pages and archive must still load;
+           * the stored value stays in the data but is no longer displayed.
+           * Runs AFTER the count/chain snapshots above because the archive
+           * export appends its own audited event. */
+          const detail = await fetch('http://localhost:4001/admin/elections/1', { headers: { Cookie: cookie } });
+          out.detailStatus = detail.status;
+          const detailText = await detail.text();
+          out.detailHasTitle = detailText.includes('Local 947 Officer Election 2025');
+          out.detailShowsApproval = detailText.includes('IAFF letter 2025-01-01');
+          const archiveRes = await fetch('http://localhost:4001/admin/elections/1/archive', { headers: { Cookie: cookie } });
+          out.archiveStatus = archiveRes.status;
+          const archiveJson = JSON.parse(await archiveRes.text());
+          out.archiveKeepsApproval = archiveJson.election.iaff_legal_approval === 'IAFF letter 2025-01-01';
           console.log('RESULT:' + JSON.stringify(out));
         } finally { server.close(); }
       })().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
@@ -916,6 +933,11 @@ function decryptSealed(buf, keyHex) {
     assert.ok(mig.dashboardHasElection, 'the migrated committee still sees its election');
     assert.ok(mig.dashboardNamesLocal, 'migrated pages name the default local in the header');
     assert.ok(mig.rosterHasMember, 'the migrated committee still sees its roster');
+    assert.strictEqual(mig.detailStatus, 200, 'legacy election with a stored approval value still renders its detail page');
+    assert.ok(mig.detailHasTitle, 'legacy election detail page shows the election');
+    assert.strictEqual(mig.detailShowsApproval, false, 'stored legacy approval value is no longer displayed');
+    assert.strictEqual(mig.archiveStatus, 200, 'legacy election records archive still exports');
+    assert.ok(mig.archiveKeepsApproval, 'archive preserves the legacy approval data (nothing dropped)');
 
     /* Idempotency: booting the migrated database again must not create a
      * second local or re-run the backfill. */
@@ -926,7 +948,7 @@ function decryptSealed(buf, keyHex) {
 
     console.log('\nALL SMOKE TESTS PASSED ✔');
     console.log(`  Local A election #${eid}: 6 ballots, Smith elected (majority), dues adopted (2/3).`);
-    console.log('  Verified: approval gate, one-time shares, hashed credentials, unlinkable ballots,');
+    console.log('  Verified: binding officer create needs no approval reference, one-time shares, hashed credentials, unlinkable ballots,');
     console.log('  date-only redemption, double-vote rejection, 3-of-5 threshold tally, per-local audit chain, archive.');
     console.log('  Verified: email-verification gate (block/verify/single-use token/reset-on-change),');
     console.log('  Florida PERC ratification hard stop (block, variance path, test/non-ratification/non-FL unaffected),');

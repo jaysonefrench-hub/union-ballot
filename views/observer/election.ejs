@@ -6,7 +6,6 @@
   <span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span>
   · <%= e.kind.replace(/_/g,' ') %>
   · Ballot key: <%= e.key_threshold %>-of-<%= e.key_shares_total %> shares
-  <% if (e.iaff_legal_approval) { %> · IAFF Legal approval: <%= e.iaff_legal_approval %><% } %>
   <% if (e.notice_sent_on) { %> · Notice sent <%= e.notice_sent_on %><% } %>
 </p>
 
