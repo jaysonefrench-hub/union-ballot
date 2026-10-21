@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS elections (
   jurisdiction TEXT,          -- two-letter state code (e.g. 'FL'); drives jurisdiction-specific legal gates
   perc_variance_ack INTEGER NOT NULL DEFAULT 0, -- committee's recorded claim of a current Florida PERC variance for electronic ratification (never a system approval)
   perc_variance_ref TEXT,     -- optional date/reference for that claimed variance, kept for the record
-  iaff_legal_approval TEXT,   -- for secret-ballot kinds: recorded acknowledgment/reference of IAFF Legal Dept approval (per IAFF Best Practices & Model Rules)
+  iaff_legal_approval TEXT,   -- LEGACY, no longer required, written, or displayed: kept only so pre-existing rows and archives keep loading. IAFF Legal Dept approval is handled outside the app.
   is_test INTEGER NOT NULL DEFAULT 0,
   /*
    * DEMO / TEST dry-run: when is_test=1 AND this flag is 1, electronic

@@ -365,20 +365,11 @@ module.exports = function adminRoutes({ flash }) {
       return res.redirect('/admin/elections/new');
     }
 
-    /*
-     * IAFF Best Practices & Model Rules: matters requiring a secret ballot
-     * under applicable law or the IAFF Constitution (officer elections,
-     * delegate elections, dues rate adjustments) may only be voted
-     * electronically after the Local obtains approval of the platform and
-     * procedures from the IAFF Legal Department. A binding (non-test) vote
-     * of these kinds requires the committee to record that approval.
-     */
-    const SECRET_BALLOT_KINDS = ['officer_election', 'delegate_election', 'dues_assessment'];
-    const approvalRef = String(req.body.iaff_legal_approval || '').trim();
-    if (SECRET_BALLOT_KINDS.includes(kind) && !isTest && !approvalRef) {
-      flash(req, 'error', 'Officer elections, delegate elections, and dues votes require a secret ballot. Per the IAFF Best Practices & Model Rules, record the IAFF Legal Department\u2019s approval of this platform and your procedures (date/reference) before creating a binding vote \u2014 or mark this as a test election.');
-      return res.redirect('/admin/elections/new');
-    }
+    /* IAFF Legal Department approval of the platform and procedures, where a
+     * Local needs it for secret-ballot matters, is handled entirely outside
+     * the app: creation imposes no approval requirement and records nothing
+     * about it. (The legacy iaff_legal_approval column remains in the schema
+     * only so pre-existing rows and archives keep loading.) */
     const sharesTotal = Math.min(Math.max(Number(req.body.key_shares_total || 5), 2), 15);
     const threshold = Math.min(Math.max(Number(req.body.key_threshold || 3), 2), sharesTotal);
     const keyholders = String(req.body.keyholders || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -400,9 +391,9 @@ module.exports = function adminRoutes({ flash }) {
     let electionId;
     db.transaction(() => {
       const info = db.prepare(`INSERT INTO elections
-        (local_id, title, kind, jurisdiction, perc_variance_ack, perc_variance_ref, iaff_legal_approval, is_test, demo_skip_email_verify, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(req.localId, title.trim(), kind, jurisdiction, percAck, percRef || null, approvalRef || null, isTest, demoSkip, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
+        (local_id, title, kind, jurisdiction, perc_variance_ack, perc_variance_ref, is_test, demo_skip_email_verify, status, notice_sent_on, opens_at, closes_at, public_key, key_shares_total, key_threshold, keyholders)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(req.localId, title.trim(), kind, jurisdiction, percAck, percRef || null, isTest, demoSkip, 'draft', notice_sent_on || null, opens_at || null, closes_at || null,
           keys.publicKey, sharesTotal, threshold, JSON.stringify(keyholders));
       electionId = info.lastInsertRowid;
       for (let i = 0; i < raceTitles.length; i++) {
@@ -415,7 +406,7 @@ module.exports = function adminRoutes({ flash }) {
     })();
 
     audit(req.localId, req.session.user.username, 'election.created',
-      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${approvalRef ? `; IAFF Legal Dept approval recorded: ${approvalRef}` : ''}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''} — not verified by this system` : ''}${demoSkip ? '; DEMO skip-email-verify ON (TEST dry-run)' : ''}`);
+      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''} — not verified by this system` : ''}${demoSkip ? '; DEMO skip-email-verify ON (TEST dry-run)' : ''}`);
 
     /* Shares are displayed exactly once and never stored. */
     if (isTest) markTestElectionBanner(res, { is_test: 1 });

@@ -83,7 +83,7 @@ Run behind HTTPS — this is non-negotiable for a real election. The simplest de
 
 ## Running an election
 
-The workflow the app enforces: create the vote (for officer, delegate, and dues votes it requires you to record IAFF Legal Department approval of the platform and procedures, per the IAFF Best Practices and Model Rules) → the key ceremony displays the decryption shares exactly once for distribution to keyholders → issue credentials (eligibility is frozen from the roster at that moment; electronic credentials go only to verified email addresses, and members without email or who opt for paper are listed for the alternative method) → open voting → close voting → tally ceremony with K keyholders and observers present → publish results and export the records archive.
+The workflow the app enforces: create the vote (where IAFF Legal Department approval of the platform and procedures is needed for officer, delegate, or dues votes, obtaining it is handled outside the app; the app does not ask for or record it) → the key ceremony displays the decryption shares exactly once for distribution to keyholders → issue credentials (eligibility is frozen from the roster at that moment; electronic credentials go only to verified email addresses, and members without email or who opt for paper are listed for the alternative method) → open voting → close voting → tally ceremony with K keyholders and observers present → publish results and export the records archive.
 
 Run a **test election** first. Mark it as a test at creation, let candidate observers cast practice ballots and watch the tally — OLMS explicitly views observable test runs favorably, and it builds member confidence.
 

@@ -9,7 +9,6 @@
   · Ballot key: <%= e.key_threshold %>-of-<%= e.key_shares_total %> shares
   <% if (e.jurisdiction) { %> · Jurisdiction: <%= e.jurisdiction %><% } %>
   <% if (e.perc_variance_ack) { %> · PERC variance claimed by committee<%= e.perc_variance_ref ? ' (' + e.perc_variance_ref + ')' : '' %> — not verified by this system<% } %>
-  <% if (e.iaff_legal_approval) { %> · IAFF Legal approval: <%= e.iaff_legal_approval %><% } %>
   <% if (e.notice_sent_on) { %> · Notice sent <%= e.notice_sent_on %><% } %>
   <% if (e.opens_at) { %> · Opens <%= e.opens_at %><% } %>
   <% if (e.closes_at) { %> · Closes <%= e.closes_at %><% } %>
