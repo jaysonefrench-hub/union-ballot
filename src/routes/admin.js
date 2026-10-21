@@ -69,6 +69,17 @@ function beginEmailVerification(memberId) {
   return `${BASE_URL()}/verify-email?token=${token}`;
 }
 
+/**
+ * Reply-To for member-facing mail: the committee's own recovery email when
+ * one is on file for this local, so a member's reply reaches a person. The
+ * sending address (MAIL_FROM) is unchanged. Returns undefined when no
+ * committee account has an email, and the Reply-To header is then omitted.
+ */
+function committeeReplyTo(localId) {
+  const row = db.prepare("SELECT email FROM users WHERE local_id=? AND role='admin' AND email IS NOT NULL AND email!='' ORDER BY id LIMIT 1").get(localId);
+  return row ? row.email : undefined;
+}
+
 /** Election WITH its races/candidates — only if it belongs to this local
  * (throws a 404 otherwise; tenant.getElection carries the local_id check). */
 function getElection(localId, id) {
@@ -228,7 +239,7 @@ module.exports = function adminRoutes({ flash }) {
         for (const m of withEmail) {
           const verifyUrl = beginEmailVerification(m.id);
           try {
-            await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl });
+            await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
             sent++;
           } catch (err) { failures.push(`${m.name} <${m.email}>: ${err.message}`); }
         }
@@ -291,7 +302,7 @@ module.exports = function adminRoutes({ flash }) {
       if (emailChanged && newEmail && smtpConfigured()) {
         const verifyUrl = beginEmailVerification(m.id);
         try {
-          await sendVerificationEmail({ to: newEmail, memberName: m.name, verifyUrl });
+          await sendVerificationEmail({ to: newEmail, memberName: m.name, verifyUrl, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
           flash(req, 'ok', `Saved. ${m.name}'s email changed, so a new verification link was emailed to ${newEmail}.`);
         } catch (err) {
           flash(req, 'error', `Saved, but the verification email to ${newEmail} failed (${err.message}). Use Resend on the row.`);
@@ -313,7 +324,7 @@ module.exports = function adminRoutes({ flash }) {
 
       const verifyUrl = beginEmailVerification(m.id);
       if (smtpConfigured()) {
-        await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl });
+        await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
         audit(req.localId, req.session.user.username, 'roster.verification_email_sent', `Verification link (re)sent to member #${m.id} (${m.name}); any previous link is now invalid`);
         flash(req, 'ok', `Verification link emailed to ${m.name} <${m.email}>. Any earlier link no longer works.`);
         res.redirect('/admin/members');
@@ -568,7 +579,7 @@ module.exports = function adminRoutes({ flash }) {
         let sent = 0; const failures = [];
         for (const { member, credential } of issued) {
           try {
-            await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at });
+            await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
             sent++;
           } catch (err) { failures.push(`${member.name} <${member.email}>: ${err.message}`); }
         }
@@ -648,7 +659,7 @@ module.exports = function adminRoutes({ flash }) {
       const emailOk = !!(member.email && checkEmailSyntax(member.email).ok);
       const canEmailCred = smtpConfigured() && emailOk && (member.email_verified || electionSkipsEmailVerify(e));
       if (canEmailCred) {
-        await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at });
+        await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
         flash(req, 'ok', `A replacement credential was emailed to ${member.name}. The previous credential no longer works.`);
         res.redirect(`/admin/elections/${e.id}`);
       } else {
