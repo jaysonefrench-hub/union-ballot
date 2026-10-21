@@ -24,7 +24,7 @@
     <div>
       <label for="jurisdiction">Jurisdiction (state of the bargaining unit / local)</label>
       <select id="jurisdiction" name="jurisdiction" required>
-        <option value="">— select —</option>
+        <option value="">(select)</option>
         <% jurisdictions.forEach(function (j) { %>
           <option value="<%= j[0] %>" <%= j[0] === defaultJurisdiction ? 'selected' : '' %>><%= j[1] %></option>
         <% }) %>
@@ -69,9 +69,9 @@
     </div>
   </div>
 
-  <label style="margin-top:18px"><input type="checkbox" name="is_test" value="1" id="isTest" style="width:auto"> This is a <strong>test election</strong> (DEMO / TEST — not a binding election; practice ballots, results don't count)</label>
+  <label style="margin-top:18px"><input type="checkbox" name="is_test" value="1" id="isTest" style="width:auto"> This is a <strong>test election</strong> (DEMO / TEST: not a binding election; practice ballots, results don't count)</label>
   <div class="notice seal" id="demoSkipNotice" style="display:none">
-    <strong>DEMO / TEST dry-run — not a binding election.</strong>
+    <strong>DEMO / TEST dry-run: not a binding election.</strong>
     New test elections skip magic-link email verification by default so the committee can issue
     electronic credentials without SMTP or members clicking confirmation links. Roster email
     <em>syntax</em> is still validated on import/edit. The paper-ballot path is unchanged.
@@ -85,11 +85,11 @@
   </div>
 
   <h2>Races / questions</h2>
-  <p class="sub">For a yes/no question (ratification, bylaw, budget), enter the question as the race title with candidates "Yes" and "No". Bylaw amendments typically require a two-thirds threshold — check your CBL.</p>
+  <p class="sub">For a yes/no question (ratification, bylaw, budget), enter the question as the race title with candidates "Yes" and "No". Bylaw amendments typically require a two-thirds threshold, so check your CBL.</p>
   <div id="races"></div>
   <button class="btn small" type="button" id="addRace">+ Add another race or question</button>
 
-  <h2>Key ceremony — who can unseal the ballots</h2>
+  <h2>Key ceremony: who can unseal the ballots</h2>
   <p class="sub">The ballot decryption key is split into shares. No ballots can ever be read unless the threshold number of keyholders act together. Choose keyholders from opposing camps plus a neutral (e.g., one representative per candidate slate + a neutral member).</p>
   <div class="row">
     <div>
@@ -123,7 +123,7 @@
       '<option value="majority"' + (threshold === 'majority' ? ' selected' : '') + '>Majority (IAFF default, runoff if none)</option>' +
       '<option value="two_thirds"' + (threshold === 'two_thirds' ? ' selected' : '') + '>Two-thirds</option>' +
       '<option value="plurality">Plurality (top N)</option></select></div></div>' +
-      '<label>Candidates / options — one per line, in ballot order</label>' +
+      '<label>Candidates / options (one per line, in ballot order)</label>' +
       '<textarea name="race_candidates" rows="4">' + (cands || '') + '</textarea>';
     wrap.appendChild(d);
   }
@@ -163,10 +163,10 @@
     if (wrap.children.length === 0 || (wrap.children.length === 1 && !wrap.querySelector('input[name=race_title]').value)) {
       wrap.innerHTML = ''; n = 0;
       var k = this.value;
-      if (k === 'contract_ratification') addRace('Shall the tentative agreement be ratified?', 'Yes — ratify\nNo — reject', 'majority');
-      else if (k === 'bylaw_amendment') addRace('Shall the proposed bylaw amendment be adopted?', 'Yes — adopt\nNo — reject', 'two_thirds');
-      else if (k === 'budget') addRace('Shall the proposed annual budget be approved?', 'Yes — approve\nNo — reject', 'majority');
-      else if (k === 'dues_assessment') addRace('Shall the proposed dues/assessment change be adopted?', 'Yes — adopt\nNo — reject', 'majority');
+      if (k === 'contract_ratification') addRace('Shall the tentative agreement be ratified?', 'Yes (ratify)\nNo (reject)', 'majority');
+      else if (k === 'bylaw_amendment') addRace('Shall the proposed bylaw amendment be adopted?', 'Yes (adopt)\nNo (reject)', 'two_thirds');
+      else if (k === 'budget') addRace('Shall the proposed annual budget be approved?', 'Yes (approve)\nNo (reject)', 'majority');
+      else if (k === 'dues_assessment') addRace('Shall the proposed dues/assessment change be adopted?', 'Yes (adopt)\nNo (reject)', 'majority');
       else addRace();
     }
   });

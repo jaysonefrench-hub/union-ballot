@@ -1,6 +1,6 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Key ceremony — shown exactly once</p>
+<p class="eyebrow">Key ceremony · shown exactly once</p>
 <h1>Distribute these key shares now</h1>
 <div class="notice warn">
   <strong>These shares are NOT stored anywhere.</strong> When you leave this page they are gone.
@@ -11,9 +11,9 @@
 </div>
 <% shares.forEach(function (s, i) { %>
   <div class="share-box">
-    <span class="holder">Share <%= i + 1 %><%= keyholders[i] ? ' — ' + keyholders[i] : '' %></span>
+    <span class="holder">Share <%= i + 1 %><%= keyholders[i] ? ': ' + keyholders[i] : '' %></span>
     <%= s %>
   </div>
 <% }) %>
-<a class="btn primary" href="/admin/elections/<%= electionId %>">I have distributed the shares — continue</a>
+<a class="btn primary" href="/admin/elections/<%= electionId %>">I have distributed the shares, continue</a>
 <%- include('../partials/foot') %>

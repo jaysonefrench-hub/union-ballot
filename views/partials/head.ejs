@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title><%= title %> — <%= brand.org %></title>
+  <title><%= title %> · <%= brand.org %></title>
   <link rel="stylesheet" href="/style.css">
   <link rel="icon" href="<%= brand.logo %>">
 </head>
@@ -14,7 +14,7 @@
 <div class="demobar" role="status"><strong>Demo</strong><%= brand.demoNotice %></div>
 <% } %>
 <% if (electionIsTest) { %>
-<div class="demobar election-testbar" role="status"><strong>DEMO / TEST</strong> — not a binding election</div>
+<div class="demobar election-testbar" role="status"><strong>DEMO / TEST</strong>: not a binding election</div>
 <% } %>
 <header class="topbar">
   <a class="brand" href="/">
@@ -42,7 +42,7 @@
   </nav>
   <div class="who">
     <% if (user) { %>
-      <span><%= user.name %> (<%= user.role %><% if (currentLocal) { %> — <%= currentLocal.name %><% } %>)</span>
+      <span><%= user.name %> (<%= user.role %><% if (currentLocal) { %>, <%= currentLocal.name %><% } %>)</span>
       <form method="post" action="/logout"><button type="submit">Sign out</button></form>
     <% } else if (platformAdmin) { %>
       <span><%= platformAdmin.name %> (platform administrator)</span>

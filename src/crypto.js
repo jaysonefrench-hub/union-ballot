@@ -149,7 +149,7 @@ function decryptBallot(stored, privateKey) {
     new Uint8Array(Buffer.from(e, 'base64')),
     privateKey
   );
-  if (!opened) throw new Error('A ballot failed to decrypt — possible tampering or wrong key shares.');
+  if (!opened) throw new Error('A ballot failed to decrypt: possible tampering or wrong key shares.');
   const obj = JSON.parse(Buffer.from(opened).toString('utf8'));
   zeroize(opened);
   return obj;

@@ -6,8 +6,8 @@
   <strong>Integrity check:</strong>
   <%= results.ballots_cast %> sealed ballots decrypted ·
   <%= results.redeemed_credentials %> credentials redeemed ·
-  <%= results.failed_decrypts %> decryption failures —
-  <% if (results.integrity_ok) { %>counts match. <% } else { %><strong>MISMATCH — investigate via the audit log before certifying.</strong><% } %>
+  <%= results.failed_decrypts %> decryption failures:
+  <% if (results.integrity_ok) { %>counts match. <% } else { %><strong>MISMATCH. Investigate via the audit log before certifying.</strong><% } %>
   Remember to add any paper ballots (counted by hand with observers) to these electronic totals before certifying.
 </div>
 <% results.races.forEach(function (race) { %>
@@ -24,7 +24,7 @@
       <tr class="<%= race.winners.includes(s.name) ? 'winner' : '' %>">
         <td><%= s.name %></td>
         <td><%= s.votes %></td>
-        <td><%= race.ballots_in_race ? Math.round(1000 * s.votes / race.ballots_in_race) / 10 + '%' : '—' %></td>
+        <td><%= race.ballots_in_race ? Math.round(1000 * s.votes / race.ballots_in_race) / 10 + '%' : '-' %></td>
         <td><%= race.winners.includes(s.name) ? (race.threshold === 'two_thirds' ? 'ADOPTED' : 'ELECTED') : '' %></td>
       </tr>
     <% }) %>
@@ -35,6 +35,6 @@
       (<%= race.seats > 1 ? 'top non-winning candidates, up to two per unfilled seat, ties at the cutoff included' : 'IAFF sample CBL Art. on elections: runoff between the two candidates receiving the most votes' %>).</div>
   <% } %>
   <% if (race.threshold === 'two_thirds' && race.winners.length === 0 && !(race.tie_flags || []).length) { %>
-    <div class="notice"><strong>Not adopted</strong> — the leading option did not reach two-thirds of ballots cast on the question.</div>
+    <div class="notice"><strong>Not adopted.</strong> The leading option did not reach two-thirds of ballots cast on the question.</div>
   <% } %>
 <% }) %>
