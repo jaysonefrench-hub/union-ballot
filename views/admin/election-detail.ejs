@@ -15,11 +15,17 @@
 </p>
 
 <div class="stat-row">
-  <div class="stat"><div class="n"><%= eligibleCount || '—' %></div><div class="l">Eligible</div></div>
+  <div class="stat"><div class="n"><%= eligibleCount || '-' %></div><div class="l">Eligible</div></div>
   <div class="stat"><div class="n"><%= credStats.total || 0 %></div><div class="l">Credentials issued</div></div>
   <div class="stat"><div class="n"><%= turnout.length %></div><div class="l">Have voted</div></div>
   <div class="stat"><div class="n"><%= ballotCount %></div><div class="l">Sealed ballots</div></div>
 </div>
+
+<p style="margin-top:14px">
+  <a class="btn" href="/admin/elections/<%= e.id %>/preview">Preview ballot</a>
+  <span class="sub" style="margin-left:8px">Read-only view of the ballot exactly as a voter will see it,
+  available in every status. Nothing can be cast from it and no credential is involved.</span>
+</p>
 
 <% if (e.is_test) { %>
   <h2>DEMO / TEST settings</h2>

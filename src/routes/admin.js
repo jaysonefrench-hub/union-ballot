@@ -458,6 +458,21 @@ module.exports = function adminRoutes({ flash }) {
     });
   });
 
+  /* ---------------- ballot preview (read-only, any status) ----------------
+   * Renders the EXACT voter ballot template (views/ballot.ejs) in preview
+   * mode, so what the committee proofreads can never drift from what voters
+   * see. Available in every status, including draft and before credentials
+   * exist. Strictly read-only: no credential is checked, created, or
+   * redeemed; no ballot, turnout, or key row is touched. Only the audit
+   * entry below is written. */
+  router.get('/elections/:id/preview', (req, res) => {
+    const e = getElection(req.localId, req.params.id);
+    audit(req.localId, req.session.user.username, 'election.ballot_previewed',
+      `Election #${e.id} "${e.title}": ballot previewed by the committee (read-only; no credential, ballot, or turnout record involved)`);
+    markTestElectionBanner(res, e);
+    res.render('ballot', { title: `Ballot preview: ${e.title}`, election: e, races: e.races, preview: true });
+  });
+
   /* ---------------- DEMO skip-email-verify toggle (TEST elections only) ---- */
   router.post('/elections/:id/demo-skip-email-verify', (req, res) => {
     const e = getElection(req.localId, req.params.id);

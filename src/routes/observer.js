@@ -17,7 +17,7 @@
 'use strict';
 
 const express = require('express');
-const { db, verifyAuditChain } = require('../db');
+const { db, audit, verifyAuditChain } = require('../db');
 const { markTestElectionBanner } = require('../election-demo');
 const tenant = require('../tenant');
 
@@ -56,6 +56,21 @@ module.exports = function observerRoutes() {
       eligible: JSON.parse(e.eligibility_snapshot || '[]').length,
       results: e.results_json ? JSON.parse(e.results_json) : null,
     });
+  });
+
+  /* Ballot preview (read-only, any status): the same voter ballot template
+   * the committee previews, with every control disabled and nothing castable.
+   * Observers are entitled to see the ballot configuration; this shows it
+   * exactly as voters will. Touches no credential, ballot, turnout, or key. */
+  router.get('/elections/:id/preview', (req, res) => {
+    const e = tenant.findElection(req.localId, req.params.id);
+    if (!e) return res.redirect('/observe');
+    e.races = db.prepare('SELECT * FROM races WHERE election_id=? ORDER BY position, id').all(e.id);
+    for (const r of e.races) r.candidates = db.prepare('SELECT * FROM candidates WHERE race_id=? ORDER BY position, id').all(r.id);
+    audit(req.localId, req.session.user.username, 'election.ballot_previewed',
+      `Election #${e.id} "${e.title}": ballot previewed by an observer (read-only; no credential, ballot, or turnout record involved)`);
+    markTestElectionBanner(res, e);
+    res.render('ballot', { title: `Ballot preview: ${e.title}`, election: e, races: e.races, preview: true });
   });
 
   router.get('/audit', (req, res) => {

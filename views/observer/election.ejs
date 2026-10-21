@@ -20,6 +20,8 @@
 <% } %>
 
 <h2>Ballot configuration</h2>
+<p><a class="btn" href="/observe/elections/<%= e.id %>/preview">Preview ballot</a>
+<span class="sub" style="margin-left:8px">Read-only view of the ballot exactly as a voter will see it. Nothing can be cast from it.</span></p>
 <% e.races.forEach(function (r) { %>
   <h3><%= r.title %> (<%= r.seats %> seat<%= r.seats>1?'s':'' %>, <%= r.threshold.replace('_',' ') %>)</h3>
   <ul><% r.candidates.forEach(function (c) { %><li><%= c.name %></li><% }) %></ul>
