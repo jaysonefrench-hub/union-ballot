@@ -99,7 +99,7 @@ const BRAND = {
    * instance where it is set. */
   demo: process.env.DEMO === '1',
   demoNotice: process.env.DEMO_NOTICE
-    || 'Demonstration site. Practice ballots only — nothing here is a real election, and no result is binding.',
+    || 'Demonstration site. Practice ballots only: nothing here is a real election, and no result is binding.',
 };
 
 /* Make user + flash + branding available to all views */
@@ -257,8 +257,8 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
      * chain. Never a local id derived from any submitted value. */
     const errLocalId = req.localId ?? (req.session && req.session.user ? req.session.user.local_id : null) ?? null;
     audit(errLocalId, 'system', 'error', signedIn
-      ? `${req.method} ${routePath} — ${safeMsg}`
-      : `${req.method} ${routePath} — detail withheld (voter-facing route)`);
+      ? `${req.method} ${routePath}: ${safeMsg}`
+      : `${req.method} ${routePath}: detail withheld (voter-facing route)`);
   } catch (_) {
     /* An audit-write failure must never mask the original error. */
   }

@@ -1,6 +1,6 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Observing<%= e.is_test ? ' — test election' : '' %></p>
+<p class="eyebrow">Observing<%= e.is_test ? ' · test election' : '' %></p>
 <h1><%= e.title %></h1>
 <p>
   <span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span>
@@ -20,6 +20,8 @@
 <% } %>
 
 <h2>Ballot configuration</h2>
+<p><a class="btn" href="/observe/elections/<%= e.id %>/preview">Preview ballot</a>
+<span class="sub" style="margin-left:8px">Read-only view of the ballot exactly as a voter will see it. Nothing can be cast from it.</span></p>
 <% e.races.forEach(function (r) { %>
   <h3><%= r.title %> (<%= r.seats %> seat<%= r.seats>1?'s':'' %>, <%= r.threshold.replace('_',' ') %>)</h3>
   <ul><% r.candidates.forEach(function (c) { %><li><%= c.name %></li><% }) %></ul>

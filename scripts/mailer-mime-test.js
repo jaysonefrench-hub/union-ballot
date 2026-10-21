@@ -110,6 +110,101 @@ async function assertLinkMail({ label, build, base, token }) {
   await assertTokenIntact('credential', credRaw, voteToken);
   assert.ok(credRaw.includes(`href="${voteUrl}"`), 'credential HTML links the vote URL');
 
+  /* ----- Deliverability: personal From, Reply-To, no bulk headers, -------
+   * ----- and no long dashes anywhere in a built message. ----------------- */
+  const noDash = (label, raw) => assert.ok(
+    !/[\u2013\u2014]/.test(raw),
+    `${label}: built mail must contain no en/em dash (subject or body)`
+  );
+
+  const localMail = buildCredentialEmail({
+    to: 'member@gmail.com',
+    memberName: 'Jane Doe',
+    electionTitle: '2026 Officer Election',
+    credential: 'ABCD-EFGH-IJKL-MNOP',
+    voteUrl,
+    closesAt: 'Friday noon',
+    localName: 'IAFF Local 400',
+    replyTo: 'committee@local400.org',
+  });
+  assert.strictEqual(
+    localMail.subject,
+    'Your secret-ballot voting credential: 2026 Officer Election',
+    'credential subject uses a colon, not a dash'
+  );
+  const localRaw = await renderMail(localMail);
+  assert.ok(
+    /^From: .*Election Committee, IAFF Local 400.*$/m.test(localRaw),
+    'credential From display name is "Election Committee, <local name>"'
+  );
+  assert.ok(
+    /^Reply-To: .*committee@local400\.org.*$/m.test(localRaw),
+    'credential Reply-To is the committee address when one is provided'
+  );
+  noDash('credential (with local)', localRaw);
+
+  /* Without a committee address, no Reply-To header may appear at all. */
+  assert.ok(!/^Reply-To:/mi.test(credRaw), 'no Reply-To header when none is provided');
+  assert.ok(
+    /^From: .*Election Committee.*$/m.test(credRaw),
+    'From display name defaults to "Election Committee" without a local name'
+  );
+
+  /* Personal one-to-one mail: no bulk/list headers on any built message. */
+  for (const [label, raw] of [['credential', credRaw], ['credential (with local)', localRaw]]) {
+    assert.ok(!/^List-Unsubscribe/mi.test(raw), `${label}: no List-Unsubscribe header`);
+    assert.ok(!/^List-Id/mi.test(raw), `${label}: no List-Id header`);
+    assert.ok(!/^Precedence:/mi.test(raw), `${label}: no Precedence (bulk) header`);
+  }
+  noDash('credential (default)', credRaw);
+
+  const verifRaw = await renderMail(buildVerificationEmail({
+    to: 'member@gmail.com',
+    memberName: 'Jane Doe',
+    verifyUrl: `${PROD_BASE}/verify-email?token=${token}`,
+    localName: 'IAFF Local 400',
+    replyTo: 'committee@local400.org',
+  }));
+  assert.ok(
+    /^From: .*Election Committee, IAFF Local 400.*$/m.test(verifRaw),
+    'verification From display name names the local'
+  );
+  assert.ok(
+    /^Reply-To: .*committee@local400\.org.*$/m.test(verifRaw),
+    'verification Reply-To is the committee address'
+  );
+  assert.ok(!/^List-Unsubscribe/mi.test(verifRaw) && !/^Precedence:/mi.test(verifRaw),
+    'verification: no bulk headers');
+  noDash('verification', verifRaw);
+
+  const resetRaw = await renderMail(buildPasswordResetEmail({
+    to: 'chair@example.org',
+    displayName: 'Committee Chair',
+    resetUrl: `${PROD_BASE}/reset-password?token=${token}`,
+    ttlMinutes: 60,
+  }));
+  noDash('password-reset', resetRaw);
+
+  /* MAIL_FROM_NAME overrides the generated display name. */
+  process.env.MAIL_FROM_NAME = 'Pat Alvarez, Election Chair';
+  try {
+    const overrideRaw = await renderMail(buildCredentialEmail({
+      to: 'member@gmail.com',
+      memberName: 'Jane Doe',
+      electionTitle: '2026 Officer Election',
+      credential: 'ABCD-EFGH-IJKL-MNOP',
+      voteUrl,
+      closesAt: 'Friday noon',
+      localName: 'IAFF Local 400',
+    }));
+    assert.ok(
+      /^From: .*Pat Alvarez, Election Chair.*$/m.test(overrideRaw),
+      'MAIL_FROM_NAME overrides the From display name'
+    );
+  } finally {
+    delete process.env.MAIL_FROM_NAME;
+  }
+
   /* Control: the pre-fix composition (plain `text:` string, nodemailer
    * defaults) must NOT satisfy the intact-token check. If this control
    * starts passing, nodemailer changed and the 8bit workaround may be
@@ -140,6 +235,9 @@ If you did not expect this — or you prefer a paper ballot — reply.`,
   console.log('MAILER MIME TESTS PASSED ✔');
   console.log('  Verification and password-reset links keep literal token=<hex> on the wire');
   console.log('  (production and longer BASE_URL); HTML <a href> matches; 8bit CTE.');
+  console.log('  Deliverability: personal From display name (local name or MAIL_FROM_NAME),');
+  console.log('  Reply-To only when a committee address exists, no bulk/list headers,');
+  console.log('  colon subject, and no long dashes in any built message.');
   console.log('  Control confirms default nodemailer QP still fails the same check.');
 })().catch((e) => {
   console.error('MAILER MIME TEST FAILED:', e);

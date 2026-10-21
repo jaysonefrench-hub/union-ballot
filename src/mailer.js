@@ -16,9 +16,9 @@
  * MIME / LINK INTEGRITY
  * ---------------------
  * Nodemailer will quoted-printable-encode a text/plain part whenever the
- * body is not 7-bit ASCII *or* any line is longer than 76 characters. Both
- * are true of these messages: they contain typographic em-dashes, and a
- * production verification URL (`https://vote.union-ballot.com/verify-email
+ * body is not 7-bit ASCII *or* any line is longer than 76 characters. The
+ * second is true of these messages: a production verification URL
+ * (`https://vote.union-ballot.com/verify-email
  * ?token=` + 32 hex chars, indented 4 spaces) is 85 characters.
  *
  * Quoted-printable then:
@@ -37,6 +37,19 @@
  * never escaped or wrapped. An HTML alternative with a real <a href>
  * is sent alongside so a client that only follows anchors still gets an
  * unwrapped link.
+ *
+ * DELIVERABILITY (Gmail Primary vs Promotions)
+ * --------------------------------------------
+ * Credential and verification mail must read like a short personal note
+ * from the election committee, not a campaign blast:
+ *   - short plain text first; the HTML alternative is the same words with
+ *     no styling, no images, no banners, and exactly one link;
+ *   - a personal From display name ("Election Committee, <local name>",
+ *     overridable via MAIL_FROM_NAME) on the unchanged sending address;
+ *   - Reply-To the committee's own address when one is on file, so replies
+ *     reach a person;
+ *   - sent one at a time to one recipient (never BCC batches);
+ *   - no List-Unsubscribe, Precedence: bulk, or other bulk-mail headers.
  */
 'use strict';
 
@@ -91,11 +104,29 @@ function htmlAlternative(text, urls) {
   return `<!DOCTYPE html>\n<html><body>\n${html.replace(/\n/g, '<br>\n')}\n</body></html>\n`;
 }
 
-function mailFrom() {
-  return process.env.MAIL_FROM || 'noreply@localhost';
+/** The bare addr-spec from MAIL_FROM, which may be `addr@x` or `Name <addr@x>`. */
+function mailFromAddress() {
+  const raw = (process.env.MAIL_FROM || 'noreply@localhost').trim();
+  const angled = raw.match(/<([^<>]+)>\s*$/);
+  return angled ? angled[1].trim() : raw;
 }
 
-function buildCredentialEmail({ to, memberName, electionTitle, credential, voteUrl, closesAt }) {
+/**
+ * From header with a personal display name on the unchanged sending address.
+ * MAIL_FROM_NAME overrides; otherwise "Election Committee, <local name>".
+ */
+function mailFrom(localName) {
+  const name = process.env.MAIL_FROM_NAME
+    || (localName ? `Election Committee, ${localName}` : 'Election Committee');
+  return { name, address: mailFromAddress() };
+}
+
+/** Sign-off naming the committee of the member's own local. */
+function signoff(localName) {
+  return localName ? `Election Committee, ${localName}` : 'Election Committee';
+}
+
+function buildCredentialEmail({ to, memberName, electionTitle, credential, voteUrl, closesAt, localName, replyTo }) {
   const text =
 `${memberName},
 
@@ -107,7 +138,7 @@ Your one-time voting credential:
 
 How to vote:
 1. Go to: ${voteUrl}
-2. Enter the credential above. Do NOT enter your name anywhere — the ballot is secret and the system stores no link between you and your choices.
+2. Enter the credential above. Do not enter your name anywhere. The ballot is secret and the system stores no link between you and your choices.
 3. Make your selections and press "Cast ballot".
 
 Voting closes: ${closesAt || 'see election notice'}.
@@ -115,22 +146,23 @@ Voting closes: ${closesAt || 'see election notice'}.
 Keep this credential private. It can be used only once. If you lose it, contact the election committee for a replacement (your old one will be voided).
 For ballot secrecy, delete this email after you vote.
 
-— Election Committee`;
+${signoff(localName)}`;
   return {
-    from: mailFrom(),
+    from: mailFrom(localName),
     to,
-    subject: `Your secret-ballot voting credential — ${electionTitle}`,
+    ...(replyTo ? { replyTo } : {}),
+    subject: `Your secret-ballot voting credential: ${electionTitle}`,
     text: eightBitPart('text/plain', text),
     html: eightBitPart('text/html', htmlAlternative(text, [voteUrl])),
   };
 }
 
-function buildVerificationEmail({ to, memberName, verifyUrl }) {
+function buildVerificationEmail({ to, memberName, verifyUrl, localName, replyTo }) {
   const text =
 `${memberName},
 
 Your local's election committee added this email address to the voter roster
-for ELECTRONIC ballot delivery. Before any voting credential can be sent to
+for electronic ballot delivery. Before any voting credential can be sent to
 this address, you must confirm that it is yours and that it works.
 
 Confirm your email address by opening this link:
@@ -140,15 +172,16 @@ Confirm your email address by opening this link:
 The link works exactly once and expires. If it has expired, ask the election
 committee to resend it.
 
-If you did not expect this — or you prefer a paper ballot — reply to the
+If you did not expect this, or you prefer a paper ballot, reply to the
 election committee. Members who do not confirm an email address are provided
 the alternative paper-ballot method instead; confirming is only required for
 electronic ballot delivery.
 
-— Election Committee`;
+${signoff(localName)}`;
   return {
-    from: mailFrom(),
+    from: mailFrom(localName),
     to,
+    ...(replyTo ? { replyTo } : {}),
     subject: 'Confirm your email address for electronic voting',
     text: eightBitPart('text/plain', text),
     html: eightBitPart('text/html', htmlAlternative(text, [verifyUrl])),
@@ -166,14 +199,14 @@ Choose a new password by opening this link:
     ${resetUrl}
 
 The link works exactly once and expires in ${ttlMinutes} minutes. Your
-password is never emailed or displayed — you will set a new one of your own
+password is never emailed or displayed; you will set a new one of your own
 choosing on that page.
 
 If you did not request this, you can ignore this email: your current
 password still works and nothing has changed. The request has been recorded
 in the tamper-evident audit log either way.
 
-— Election system`;
+Election system`;
   return {
     from: mailFrom(),
     to,

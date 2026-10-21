@@ -491,7 +491,7 @@ const migrateToLocals = db.transaction(() => {
    * only — never a member name or address. */
   const localName = db.prepare('SELECT name FROM locals WHERE id=?').get(localId).name;
   audit(null, 'system', 'platform.migrated_to_locals',
-    `Multi-local migration: existing data assigned to default local #${localId} "${localName}" — `
+    `Multi-local migration: existing data assigned to default local #${localId} "${localName}": `
     + `${orphanCounts.members} roster member(s), ${orphanCounts.elections} election(s), `
     + `${orphanCounts.users} committee/observer account(s), ${orphanCounts.audit_log} audit entrie(s), `
     + `${orphanCounts.archives} archive record(s)`);
