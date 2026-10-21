@@ -317,12 +317,12 @@ module.exports = function platformRoutes({ flash }) {
     const adminDisplayName = String(req.body.admin_display_name || '').trim() || adminUsername;
     const adminEmail = String(req.body.admin_email || '').trim() || null;
 
-    if (!name) { flash(req, 'error', 'The local needs a name (e.g. "IAFF Local 947 — Greensboro").'); return res.redirect('/platform'); }
+    if (!name) { flash(req, 'error', 'The local needs a name (e.g. "IAFF Local 947, Greensboro").'); return res.redirect('/platform'); }
     if (!JURISDICTION_CODES.has(jurisdiction)) { flash(req, 'error', 'Select the local\u2019s state/jurisdiction.'); return res.redirect('/platform'); }
     if (!adminUsername || adminPassword.length < 10) { flash(req, 'error', 'The first committee account needs a username and a password of at least 10 characters.'); return res.redirect('/platform'); }
     if (adminEmail) {
       const check = checkEmailSyntax(adminEmail);
-      if (!check.ok) { flash(req, 'error', `Local not created. "${adminEmail}" does not look like a deliverable email address — ${check.reason}.`); return res.redirect('/platform'); }
+      if (!check.ok) { flash(req, 'error', `Local not created. "${adminEmail}" does not look like a deliverable email address: ${check.reason}.`); return res.redirect('/platform'); }
     }
 
     let local;
@@ -347,7 +347,7 @@ module.exports = function platformRoutes({ flash }) {
     audit(null, `platform:${req.platformAdmin.username}`, 'platform.local_created',
       `Local #${local.id} "${name}" (jurisdiction ${jurisdiction}) created with first committee-admin account "${adminUsername}"`);
 
-    flash(req, 'ok', `Local "${name}" created. Hand its committee the sign-in URL (/login), the username "${adminUsername}", and the password you chose — and have them add a recovery email and their observer accounts under Accounts.`);
+    flash(req, 'ok', `Local "${name}" created. Hand its committee the sign-in URL (/login), the username "${adminUsername}", and the password you chose, and have them add a recovery email and their observer accounts under Accounts.`);
     res.redirect('/platform');
   });
 
@@ -378,7 +378,7 @@ module.exports = function platformRoutes({ flash }) {
       /* Feedback is fine here (this caller is authenticated), but the
        * submitted value still stays out of the permanent log. */
       audit(null, `platform:${req.platformAdmin.username}`, 'platform.reset_link_rejected', 'One-time reset link requested for an unknown account (submitted name not recorded)');
-      flash(req, 'error', 'No committee or observer account has that exact username. Ask the local to confirm it — usernames are case-sensitive.');
+      flash(req, 'error', 'No committee or observer account has that exact username. Ask the local to confirm it (usernames are case-sensitive).');
       return res.redirect('/platform');
     }
     const resetUrl = beginPasswordReset(u.id);

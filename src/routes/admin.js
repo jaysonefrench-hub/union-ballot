@@ -249,10 +249,10 @@ module.exports = function adminRoutes({ flash }) {
       if (smtpConfigured() && withEmail.length > 0) {
         flash(req, failures.length ? 'error' : 'ok',
           `${added} member(s) added. Verification links emailed to ${sent} member(s)`
-          + (failures.length ? `; ${failures.length} failed — use Resend on those rows.` : '. Electronic credentials can only be issued to verified addresses.'));
+          + (failures.length ? `; ${failures.length} failed. Use Resend on those rows.` : '. Electronic credentials can only be issued to verified addresses.'));
       } else {
         flash(req, 'ok', `${added} member(s) added.`
-          + (withEmail.length ? ` ${withEmail.length} have an email address and must confirm it before electronic credentials can be issued${smtpConfigured() ? '' : ' (SMTP is not configured — use "Send link" on each row to get a one-time verification link for manual delivery)'}.` : ''));
+          + (withEmail.length ? ` ${withEmail.length} have an email address and must confirm it before electronic credentials can be issued${smtpConfigured() ? '' : ' (SMTP is not configured: use "Send link" on each row to get a one-time verification link for manual delivery)'}.` : ''));
       }
       res.redirect('/admin/members');
     } catch (err) { next(err); }
@@ -272,7 +272,7 @@ module.exports = function adminRoutes({ flash }) {
         const check = checkEmailSyntax(newEmail);
         if (!check.ok) {
           flash(req, 'error',
-            `Not saved. "${newEmail}" does not look like a deliverable email address — ${check.reason}. `
+            `Not saved. "${newEmail}" does not look like a deliverable email address: ${check.reason}. `
             + `Fix the address and save again, or clear the email field to move ${m.name} to the paper-ballot path.`);
           return res.redirect('/admin/members');
         }
@@ -287,7 +287,7 @@ module.exports = function adminRoutes({ flash }) {
       if (emailChanged) {
         db.prepare('UPDATE members SET email_verified=0, email_verified_at=NULL, email_verify_token_hash=NULL, email_verify_sent_at=NULL WHERE id=? AND local_id=?').run(m.id, req.localId);
       }
-      audit(req.localId, req.session.user.username, 'roster.update', `Member #${m.id} (${m.name}): good_standing=${good}, paper=${paper}${emailChanged ? '; email changed — verification reset' : ''}`);
+      audit(req.localId, req.session.user.username, 'roster.update', `Member #${m.id} (${m.name}): good_standing=${good}, paper=${paper}${emailChanged ? '; email changed, verification reset' : ''}`);
       if (emailChanged && newEmail && smtpConfigured()) {
         const verifyUrl = beginEmailVerification(m.id);
         try {
@@ -297,7 +297,7 @@ module.exports = function adminRoutes({ flash }) {
           flash(req, 'error', `Saved, but the verification email to ${newEmail} failed (${err.message}). Use Resend on the row.`);
         }
       } else if (emailChanged && newEmail) {
-        flash(req, 'ok', `Saved. ${m.name}'s email changed and is unverified — send them a new verification link before issuing electronic credentials.`);
+        flash(req, 'ok', `Saved. ${m.name}'s email changed and is unverified. Send them a new verification link before issuing electronic credentials.`);
       }
       res.redirect('/admin/members');
     } catch (err) { next(err); }
@@ -411,7 +411,7 @@ module.exports = function adminRoutes({ flash }) {
     /* Shares are displayed exactly once and never stored. */
     if (isTest) markTestElectionBanner(res, { is_test: 1 });
     res.render('admin/shares-once', {
-      title: 'Key ceremony — distribute these shares now',
+      title: 'Key ceremony: distribute these shares now',
       electionId, shares: keys.shares, threshold, keyholders,
     });
   });
@@ -463,7 +463,7 @@ module.exports = function adminRoutes({ flash }) {
     const e = getElection(req.localId, req.params.id);
     if (!e.is_test) {
       audit(req.localId, req.session.user.username, 'election.demo_skip_blocked',
-        `Election #${e.id} "${e.title}": refused to set demo_skip_email_verify — binding elections must require magic-link email verification`);
+        `Election #${e.id} "${e.title}": refused to set demo_skip_email_verify (binding elections must require magic-link email verification)`);
       flash(req, 'error', 'DEMO email-verify skip can only be set on TEST elections. Binding elections always require magic-link email verification.');
       return res.redirect(`/admin/elections/${e.id}`);
     }
@@ -472,7 +472,7 @@ module.exports = function adminRoutes({ flash }) {
      * AND local_id likewise: this write can never widen past the local. */
     db.prepare('UPDATE elections SET demo_skip_email_verify=? WHERE id=? AND is_test=1 AND local_id=?').run(next, e.id, req.localId);
     audit(req.localId, req.session.user.username, 'election.demo_skip_email_verify',
-      `Election #${e.id} "${e.title}": demo_skip_email_verify set to ${next} (TEST dry-run ${next ? 'ON — unverified syntactically-valid emails eligible for electronic credentials' : 'OFF — magic-link verification required'})`);
+      `Election #${e.id} "${e.title}": demo_skip_email_verify set to ${next} (TEST dry-run ${next ? 'ON: unverified syntactically-valid emails eligible for electronic credentials' : 'OFF: magic-link verification required'})`);
     flash(req, 'ok', next
       ? 'DEMO skip-email-verify is ON for this TEST election. Electronic credentials can be issued to syntactically valid addresses without a magic-link confirm.'
       : 'DEMO skip-email-verify is OFF. This TEST election now requires email verification before electronic credentials, same as a binding vote.');
@@ -505,7 +505,7 @@ module.exports = function adminRoutes({ flash }) {
       const { electronic, paper, unverified, invalidSyntax, skipVerify } = listCredentialPaths(e);
       if (invalidSyntax.length > 0) {
         audit(req.localId, req.session.user.username, 'election.credential_issue_blocked_email_syntax',
-          `Election #${e.id}: credential issuance blocked — ${invalidSyntax.length} member(s) on the electronic path have an address that fails syntax validation`);
+          `Election #${e.id}: credential issuance blocked: ${invalidSyntax.length} member(s) on the electronic path have an address that fails syntax validation`);
         const names = invalidSyntax.slice(0, 5).map((m) => m.name).join(', ');
         flash(req, 'error',
           `Cannot issue electronic credentials: ${invalidSyntax.length} member(s) have an email that is not syntactically valid `
@@ -515,7 +515,7 @@ module.exports = function adminRoutes({ flash }) {
       }
       if (unverified.length > 0) {
         audit(req.localId, req.session.user.username, 'election.credential_issue_blocked_unverified',
-          `Election #${e.id}: credential issuance blocked — ${unverified.length} member(s) on the electronic path have unverified email addresses`);
+          `Election #${e.id}: credential issuance blocked: ${unverified.length} member(s) on the electronic path have unverified email addresses`);
         const names = unverified.slice(0, 5).map((m) => m.name).join(', ');
         flash(req, 'error',
           `Cannot issue electronic credentials: ${unverified.length} member(s) have not confirmed their email address `
@@ -615,7 +615,7 @@ module.exports = function adminRoutes({ flash }) {
       const reissueKey = getReissueKey();
       const rows = db.prepare('SELECT * FROM credentials WHERE election_id=? AND voided=0').all(e.id);
       const own = rows.find((c) => { try { return Number(aesDecrypt(c.member_ref, reissueKey)) === memberId; } catch { return false; } });
-      if (own && own.redeemed) { flash(req, 'error', `${member.name}'s credential was already used to cast a ballot; it cannot be reissued. If the member disputes this, treat it as a security incident.`); audit(req.localId, req.session.user.username, 'election.reissue_blocked', `Election #${e.id}: reissue for member #${memberId} blocked — credential already redeemed`); return res.redirect(`/admin/elections/${e.id}`); }
+      if (own && own.redeemed) { flash(req, 'error', `${member.name}'s credential was already used to cast a ballot; it cannot be reissued. If the member disputes this, treat it as a security incident.`); audit(req.localId, req.session.user.username, 'election.reissue_blocked', `Election #${e.id}: reissue for member #${memberId} blocked: credential already redeemed`); return res.redirect(`/admin/elections/${e.id}`); }
 
       const credential = generateCredential();
       const salt = randomHex(16);
@@ -688,7 +688,7 @@ module.exports = function adminRoutes({ flash }) {
       audit(req.localId, req.session.user.username, 'election.reissue_map_purged',
         `Election #${e.id} "${e.title}": member<->credential reissue map destroyed after close (${cleared} credential record(s) cleared). Hashed credentials, turnout, sealed ballots, and audit log retained.`);
       flash(req, 'ok', cleared > 0
-        ? `Reissue map destroyed — ${cleared} record(s) cleared. The stored name-to-credential link no longer exists for this election.`
+        ? `Reissue map destroyed: ${cleared} record(s) cleared. The stored name-to-credential link no longer exists for this election.`
         : 'The reissue map was already empty for this election; nothing to purge.');
       res.redirect(`/admin/elections/${e.id}`);
     } catch (err) {
@@ -813,7 +813,7 @@ module.exports = function adminRoutes({ flash }) {
       try {
         privateKey = combineShares(shares.slice(0, e.key_threshold));
       } catch (err) {
-        audit(req.localId, req.session.user.username, 'tally.key_reconstruction_failed', `Election #${e.id}: key share combination failed — ${err.message}`);
+        audit(req.localId, req.session.user.username, 'tally.key_reconstruction_failed', `Election #${e.id}: key share combination failed: ${err.message}`);
         flash(req, 'error', err.message);
         return res.redirect(`/admin/elections/${e.id}/tally`);
       }
@@ -822,7 +822,7 @@ module.exports = function adminRoutes({ flash }) {
       /* Integrity check: sealed ballots must equal redeemed credentials. */
       const redeemed = db.prepare('SELECT COUNT(*) AS n FROM credentials WHERE election_id=? AND redeemed=1').get(e.id).n;
       if (rows.length !== redeemed) {
-        audit(req.localId, req.session.user.username, 'tally.INTEGRITY_ALERT', `Election #${e.id}: ballot count (${rows.length}) does not match redeemed credentials (${redeemed}) — investigate before certifying`);
+        audit(req.localId, req.session.user.username, 'tally.INTEGRITY_ALERT', `Election #${e.id}: ballot count (${rows.length}) does not match redeemed credentials (${redeemed}). Investigate before certifying`);
       }
 
       /* Shuffle before decrypting so even the ceremony reveals no order. */
@@ -837,7 +837,7 @@ module.exports = function adminRoutes({ flash }) {
        * counting, rendering, or early return can widen its lifetime. */
       zeroize(privateKey);
       if (failed > 0 && ballots.length === 0) {
-        audit(req.localId, req.session.user.username, 'tally.decrypt_failed', `Election #${e.id}: ballots failed to decrypt — wrong shares or tampering`);
+        audit(req.localId, req.session.user.username, 'tally.decrypt_failed', `Election #${e.id}: ballots failed to decrypt (wrong shares or tampering)`);
         flash(req, 'error', 'The ballots did not decrypt. Verify each keyholder pasted their full share for THIS election.');
         return res.redirect(`/admin/elections/${e.id}/tally`);
       }
@@ -968,7 +968,7 @@ module.exports = function adminRoutes({ flash }) {
       db.prepare("UPDATE elections SET status='tallied', results_json=?, tallied_at=datetime('now') WHERE id=? AND local_id=?")
         .run(JSON.stringify(results), e.id, req.localId);
       audit(req.localId, req.session.user.username, 'tally.completed',
-        `Election #${e.id} "${e.title}": ${ballots.length} ballots unsealed with ${e.key_threshold}-of-${e.key_shares_total} key shares and counted. Integrity ${results.integrity_ok ? 'OK' : 'ALERT — see log'}.`);
+        `Election #${e.id} "${e.title}": ${ballots.length} ballots unsealed with ${e.key_threshold}-of-${e.key_shares_total} key shares and counted. Integrity ${results.integrity_ok ? 'OK' : 'ALERT (see log)'}.`);
 
       /*
        * RETENTION SAFETY NET: persist the sealed records archive the moment
@@ -982,7 +982,7 @@ module.exports = function adminRoutes({ flash }) {
       try {
         const rec = writeSealedArchive(e.id, req.localId);
         audit(req.localId, req.session.user.username, 'election.archive_stored',
-          `Election #${e.id}: sealed records archive stored automatically as ${rec.filename} (${rec.encrypted ? 'AES-256-GCM under BACKUP_KEY' : 'plaintext JSON — set BACKUP_KEY to encrypt archives at rest'}; ${rec.ballot_count} encrypted ballots; sha256 ${rec.sha256})`);
+          `Election #${e.id}: sealed records archive stored automatically as ${rec.filename} (${rec.encrypted ? 'AES-256-GCM under BACKUP_KEY' : 'plaintext JSON: set BACKUP_KEY to encrypt archives at rest'}; ${rec.ballot_count} encrypted ballots; sha256 ${rec.sha256})`);
       } catch (archiveErr) {
         console.error('[archive] automatic records archive failed:', archiveErr.message);
         audit(req.localId, req.session.user.username, 'election.archive_store_failed',
@@ -1018,7 +1018,7 @@ module.exports = function adminRoutes({ flash }) {
     const email = (req.body.email || '').trim() || null;
     if (email) {
       const check = checkEmailSyntax(email);
-      if (!check.ok) { flash(req, 'error', `Account not created. "${email}" does not look like a deliverable email address — ${check.reason}.`); return res.redirect('/admin/users'); }
+      if (!check.ok) { flash(req, 'error', `Account not created. "${email}" does not look like a deliverable email address: ${check.reason}.`); return res.redirect('/admin/users'); }
     }
     const r = role === 'admin' ? 'admin' : 'observer';
     try {
@@ -1048,7 +1048,7 @@ module.exports = function adminRoutes({ flash }) {
     const email = (req.body.email || '').trim() || null;
     if (email) {
       const check = checkEmailSyntax(email);
-      if (!check.ok) { flash(req, 'error', `Not saved. "${email}" does not look like a deliverable email address — ${check.reason}.`); return res.redirect('/admin/users'); }
+      if (!check.ok) { flash(req, 'error', `Not saved. "${email}" does not look like a deliverable email address: ${check.reason}.`); return res.redirect('/admin/users'); }
     }
     db.prepare('UPDATE users SET email=? WHERE id=? AND local_id=?').run(email, u.id, req.localId);
     audit(req.localId, req.session.user.username, 'users.email_set',

@@ -182,7 +182,7 @@ module.exports = function voterRoutes({ flash }) {
         if (!Array.isArray(picked)) picked = [picked];
         picked = picked.map(Number).filter((id) => race.candidates.some((c) => c.id === id));
         if (picked.length > race.seats) {
-          flash(req, 'error', `Too many selections for "${race.title}" — choose up to ${race.seats}. Your ballot was NOT cast; please try again.`);
+          flash(req, 'error', `Too many selections for "${race.title}": choose up to ${race.seats}. Your ballot was NOT cast; please try again.`);
           return res.redirect('/');
         }
         choices[race.id] = picked; // undervoting (including blank) is allowed

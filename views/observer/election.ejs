@@ -1,6 +1,6 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Observing<%= e.is_test ? ' — test election' : '' %></p>
+<p class="eyebrow">Observing<%= e.is_test ? ' (test election)' : '' %></p>
 <h1><%= e.title %></h1>
 <p>
   <span class="tag <%= e.status %>"><%= e.status.replace(/_/g,' ') %></span>

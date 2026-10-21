@@ -12,7 +12,7 @@
   <strong><%= rejected.length %> row(s) were NOT imported.</strong>
   Each has an email address that cannot receive mail as written (or is missing the member name), so importing
   it would leave that member stuck as “Pending” with a verification link that can never arrive. Fix the rows
-  below and re-import <em>just those rows</em> — the <%= added %> valid row(s) are already on the roster and
+  below and re-import <em>just those rows</em>: the <%= added %> valid row(s) are already on the roster and
   must not be pasted again. A blank email is always fine: that member votes by the paper-ballot method.
 </div>
 
@@ -21,22 +21,22 @@
 <% rejected.forEach(function (r) { %>
 <tr>
   <td><%= r.line %></td>
-  <td><%= r.name || '—' %></td>
-  <td class="mono"><%= r.email || '—' %></td>
+  <td><%= r.name || '-' %></td>
+  <td class="mono"><%= r.email || '-' %></td>
   <td><%= r.reason %></td>
 </tr>
 <% }) %>
 </table>
 
 <% if (failures && failures.length) { %>
-<div class="notice warn"><strong>Verification-email delivery failures — use Resend on those roster rows:</strong>
+<div class="notice warn"><strong>Verification-email delivery failures. Use Resend on those roster rows:</strong>
 <ul><% failures.forEach(function (f) { %><li><%= f %></li><% }) %></ul></div>
 <% } %>
 
 <% if (withEmailCount > 0 && !smtp) { %>
 <div class="notice">
   <%= withEmailCount %> added member(s) have an email address and must confirm it before electronic credentials
-  can be issued. SMTP is not configured — use <em>Send link</em> on each roster row to get a one-time
+  can be issued. SMTP is not configured: use <em>Send link</em> on each roster row to get a one-time
   verification link for manual delivery.
 </div>
 <% } %>

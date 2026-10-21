@@ -107,7 +107,7 @@ Your one-time voting credential:
 
 How to vote:
 1. Go to: ${voteUrl}
-2. Enter the credential above. Do NOT enter your name anywhere — the ballot is secret and the system stores no link between you and your choices.
+2. Enter the credential above. Do NOT enter your name anywhere: the ballot is secret and the system stores no link between you and your choices.
 3. Make your selections and press "Cast ballot".
 
 Voting closes: ${closesAt || 'see election notice'}.
@@ -115,11 +115,11 @@ Voting closes: ${closesAt || 'see election notice'}.
 Keep this credential private. It can be used only once. If you lose it, contact the election committee for a replacement (your old one will be voided).
 For ballot secrecy, delete this email after you vote.
 
-— Election Committee`;
+Election Committee`;
   return {
     from: mailFrom(),
     to,
-    subject: `Your secret-ballot voting credential — ${electionTitle}`,
+    subject: `Your secret-ballot voting credential: ${electionTitle}`,
     text: eightBitPart('text/plain', text),
     html: eightBitPart('text/html', htmlAlternative(text, [voteUrl])),
   };
@@ -140,12 +140,12 @@ Confirm your email address by opening this link:
 The link works exactly once and expires. If it has expired, ask the election
 committee to resend it.
 
-If you did not expect this — or you prefer a paper ballot — reply to the
+If you did not expect this (or you prefer a paper ballot), reply to the
 election committee. Members who do not confirm an email address are provided
 the alternative paper-ballot method instead; confirming is only required for
 electronic ballot delivery.
 
-— Election Committee`;
+Election Committee`;
   return {
     from: mailFrom(),
     to,
@@ -166,14 +166,14 @@ Choose a new password by opening this link:
     ${resetUrl}
 
 The link works exactly once and expires in ${ttlMinutes} minutes. Your
-password is never emailed or displayed — you will set a new one of your own
+password is never emailed or displayed. You will set a new one of your own
 choosing on that page.
 
 If you did not request this, you can ignore this email: your current
 password still works and nothing has changed. The request has been recorded
 in the tamper-evident audit log either way.
 
-— Election system`;
+Election system`;
   return {
     from: mailFrom(),
     to,

@@ -1,6 +1,6 @@
 <%- include('partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Official secret ballot<%= election.is_test ? ' — practice run, results do not count' : '' %></p>
+<p class="eyebrow">Official secret ballot<%= election.is_test ? ' (practice run, results do not count)' : '' %></p>
 <h1><%= election.title %></h1>
 <% if (election.is_test) { %><p><span class="tag test">Test election</span></p><% } %>
 
@@ -29,7 +29,7 @@
     You have selected more choices than allowed in one of the races above. Remove a selection to continue.
   </div>
 
-  <button class="btn primary" type="submit">Cast ballot — final</button>
+  <button class="btn primary" type="submit">Cast ballot (final)</button>
   <p class="sub" style="font-size:13.5px">Casting is final and your credential will be spent. Your selections are
   encrypted immediately and are not shown back to you afterward, so that no one can pressure you to prove how you voted.</p>
 </form>

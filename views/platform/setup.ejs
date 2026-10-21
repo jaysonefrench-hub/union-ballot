@@ -1,11 +1,11 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Platform administration — <%= adminExists ? 'account recovery' : 'first run' %></p>
+<p class="eyebrow">Platform administration: <%= adminExists ? 'account recovery' : 'first run' %></p>
 <h1>Create a platform administrator</h1>
 <p class="sub">The platform administrator hosts this instance for union locals: it sees aggregate,
 no-PII counts per local, creates new locals (each with its first committee account), and holds the
 recovery powers (archives, reset links, encrypted backups). It can <strong>never</strong> read a
-ballot — ballots are sealed to keyholder shares that are never stored — and no platform page shows
+ballot (ballots are sealed to keyholder shares that are never stored), and no platform page shows
 any member's name, email, or phone number.</p>
 
 <% if (!allowed.ok) { %>
@@ -15,7 +15,7 @@ any member's name, email, or phone number.</p>
 <% } else { %>
 <% if (adminExists) { %>
 <div class="notice warn">
-  <strong>A platform administrator already exists.</strong> This form adds another account —
+  <strong>A platform administrator already exists.</strong> This form adds another account:
   use it only for recovery (all platform passwords lost) or to add a second operator. The
   creation is recorded in the tamper-evident platform audit log.
 </div>

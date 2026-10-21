@@ -1,6 +1,6 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Shown exactly once — the system keeps only a hash</p>
+<p class="eyebrow">Shown exactly once: the system keeps only a hash</p>
 <h1>Verification link for <%= m.name %></h1>
 <div class="notice warn">
   <strong>Deliver this link to the member yourself</strong> (SMTP is not configured, so it was not
@@ -12,5 +12,5 @@
 <p class="mono" style="word-break:break-all"><%= verifyUrl %></p>
 <p class="sub">When the member opens the link, their address is marked verified and electronic
 credentials can be issued to it. Members who never verify can still vote by paper ballot.</p>
-<a class="btn primary" href="/admin/members">Done — I have delivered this link</a>
+<a class="btn primary" href="/admin/members">Done. I have delivered this link</a>
 <%- include('../partials/foot') %>

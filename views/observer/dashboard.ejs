@@ -1,12 +1,12 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Candidate observers — 29 U.S.C. 481(c) — <%= currentLocal.name %></p>
+<p class="eyebrow">Candidate observers, 29 U.S.C. 481(c): <%= currentLocal.name %></p>
 <h1>Observer station</h1>
 <p class="sub">Read-only visibility into every observable part of <strong><%= currentLocal.name %></strong>'s process. You can see who has voted (never how), configurations, counts, and this local's tamper-evident audit chain.</p>
 
 <div class="seal-strip">
   <strong>Audit chain verification:</strong>
-  <% if (chain.ok) { %>intact — <%= chain.total %> entries verified.<% } else { %><span style="color:var(--signal)"><strong>BROKEN at entry #<%= chain.brokenAt %></strong> — the log has been altered. Report this immediately.</span><% } %>
+  <% if (chain.ok) { %>intact: <%= chain.total %> entries verified.<% } else { %><span style="color:var(--signal)"><strong>BROKEN at entry #<%= chain.brokenAt %></strong>: the log has been altered. Report this immediately.</span><% } %>
   <% if (chain.tip) { %><div class="tip">Chain tip: <%= chain.tip %></div><% } %>
 </div>
 
@@ -16,7 +16,7 @@
     <% if (source.repoUrl) { %><a class="mono" href="<%= source.repoUrl %>/commit/<%= source.commit %>"><%= source.commit.slice(0,12) %></a><% } else { %><span class="mono"><%= source.commit.slice(0,12) %></span><% } %>
     · <% } %><%= source.fileCount %> source files fingerprinted.
   <div class="tip">Source fingerprint (SHA-256): <%= source.hash %></div>
-  <p class="sub" style="margin-top:8px">Computed from the running server's own source at startup. Anyone can reproduce it from an independent copy of the published code (the exact method is documented in <span class="mono">src/sourcehash.js</span>) and compare it here — and compare the commit above against the public repository — to confirm the deployed server is the code that was reviewed.</p>
+  <p class="sub" style="margin-top:8px">Computed from the running server's own source at startup. Anyone can reproduce it from an independent copy of the published code (the exact method is documented in <span class="mono">src/sourcehash.js</span>) and compare it here (and compare the commit above against the public repository) to confirm the deployed server is the code that was reviewed.</p>
 </div>
 
 <table>
@@ -34,5 +34,5 @@
 </tr>
 <% }) %>
 </table>
-<p class="sub">The "sealed ballots" and "redeemed credentials" columns should always match — a mismatch is an integrity alert.</p>
+<p class="sub">The "sealed ballots" and "redeemed credentials" columns should always match: a mismatch is an integrity alert.</p>
 <%- include('../partials/foot') %>
