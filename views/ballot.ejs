@@ -1,11 +1,17 @@
 <%- include('partials/head') %>
+<% var isPreview = typeof preview !== 'undefined' && !!preview; %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
+<% if (isPreview) { %>
+<div class="notice warn" role="status"><strong style="font-size:17px">PREVIEW, NOT A REAL BALLOT.</strong>
+This is a read-only view of the ballot exactly as a voter will see it. No credential is involved,
+every control is disabled, and nothing can be cast or recorded from this page.</div>
+<% } %>
 <p class="eyebrow">Official secret ballot<%= election.is_test ? ' (practice run, results do not count)' : '' %></p>
 <h1><%= election.title %></h1>
 <% if (election.is_test) { %><p><span class="tag test">Test election</span></p><% } %>
 
-<form method="post" action="/vote/cast" id="ballotForm">
-  <input type="hidden" name="credential" value="<%= credential %>">
+<form method="post" <%- isPreview ? 'onsubmit="return false"' : 'action="/vote/cast"' %> id="ballotForm">
+  <% if (!isPreview) { %><input type="hidden" name="credential" value="<%= credential %>"><% } %>
   <div class="ballot">
     <% races.forEach(function (race) { %>
       <div class="race" data-seats="<%= race.seats %>" data-race="<%= race.id %>">
@@ -17,7 +23,7 @@
         <% race.candidates.forEach(function (c) { %>
           <div class="cand">
             <input type="<%= race.seats === 1 ? 'radio' : 'checkbox' %>"
-                   id="c<%= c.id %>" name="race_<%= race.id %>" value="<%= c.id %>">
+                   id="c<%= c.id %>" name="race_<%= race.id %>" value="<%= c.id %>"<%- isPreview ? ' disabled' : '' %>>
             <label for="c<%= c.id %>"><%= c.name %></label>
           </div>
         <% }) %>
@@ -29,9 +35,15 @@
     You have selected more choices than allowed in one of the races above. Remove a selection to continue.
   </div>
 
-  <button class="btn primary" type="submit">Cast ballot (final)</button>
-  <p class="sub" style="font-size:13.5px">Casting is final and your credential will be spent. Your selections are
-  encrypted immediately and are not shown back to you afterward, so that no one can pressure you to prove how you voted.</p>
+  <% if (isPreview) { %>
+    <button class="btn primary" type="button" disabled>Cast ballot (final)</button>
+    <p class="sub" style="font-size:13.5px">Preview only: the Cast button is disabled and this page cannot submit,
+    record, or spend anything. Voters reach the real ballot with their one-time credential.</p>
+  <% } else { %>
+    <button class="btn primary" type="submit">Cast ballot (final)</button>
+    <p class="sub" style="font-size:13.5px">Casting is final and your credential will be spent. Your selections are
+    encrypted immediately and are not shown back to you afterward, so that no one can pressure you to prove how you voted.</p>
+  <% } %>
 </form>
 
 <script>

@@ -35,7 +35,7 @@ stored) and it cannot read any roster.</p>
 <tr><td>Paper ballots recorded</td><td><%= rollup.ballots.paper_recorded %></td></tr>
 </table>
 
-<h3>Turnout: all locals</h3>
+<h3>Turnout, all locals</h3>
 <p class="sub">Across votes where an eligibility snapshot exists (frozen at credential issuance).
 Overall = all voters over all eligible; average = mean of per-vote rates.</p>
 <table style="max-width:680px">
@@ -54,7 +54,7 @@ Overall = all voters over all eligible; average = mean of per-vote rates.</p>
 
 <h2>Per local</h2>
 <% if (perLocal.length === 0) { %>
-  <div class="notice">No locals yet. Create the first one below. That flow also provisions the local's first committee-admin account.</div>
+  <div class="notice">No locals yet. Create the first one below; that flow also provisions the local's first committee-admin account.</div>
 <% } else { %>
 <table>
 <tr><th>#</th><th>Local</th><th>No.</th><th>State</th><th>Roster</th><th>Votes</th><th>Tallied</th><th>Open</th><th>Credentials issued</th><th>Sealed ballots</th><th>Turnout (overall)</th></tr>
@@ -106,11 +106,11 @@ roster and votes from there.</p>
   <h3 style="margin-top:14px">First committee-admin account</h3>
   <label for="an">Name (e.g., "Election Committee Chair")</label>
   <input id="an" type="text" name="admin_display_name" required>
-  <label for="au">Username (unique across the whole platform: include the local number)</label>
+  <label for="au">Username (unique across the whole platform; include the local number)</label>
   <input id="au" type="text" name="admin_username" required autocomplete="off">
-  <label for="ap">Password (10+ characters: the committee should change it after first sign-in)</label>
+  <label for="ap">Password (10+ characters; the committee should change it after first sign-in)</label>
   <input id="ap" type="text" name="admin_password" minlength="10" required autocomplete="off">
-  <label for="ae">Recovery email (optional: enables the committee's self-service forgot-password flow)</label>
+  <label for="ae">Recovery email (optional; enables the committee's self-service forgot-password flow)</label>
   <input id="ae" type="email" name="admin_email" autocomplete="off" placeholder="committee@example.org">
   <button class="btn primary" type="submit">Create local &amp; committee account</button>
 </form>
@@ -151,7 +151,7 @@ account that is locked out<% if (smtp) { %> and cannot use the emailed
 <a href="/forgot-password">forgot-password</a> flow<% } else { %> (email delivery is not
 configured on this instance, so this is the only reset path)<% } %>. The link is shown exactly
 once, works exactly once, and expires in <%= resetTtlMinutes %> minutes. The account holder
-chooses their own new password. No password is ever emailed, displayed, or stored in plaintext.
+chooses their own new password; no password is ever emailed, displayed, or stored in plaintext.
 Verify who you are talking to before generating one: this link takes over the account. The
 confirmation page names the account's local so you can check you are helping the right one.</p>
 <form method="post" action="/platform/reset-link" style="max-width:420px">
@@ -162,7 +162,7 @@ confirmation page names the account's local so you can check you are helping the
 
 <h2>Whole-database backup</h2>
 <p class="sub">An encrypted snapshot of the entire instance database (AES-256-GCM under
-<span class="mono">BACKUP_KEY</span>): every local's data, so this is a platform function, never
+<span class="mono">BACKUP_KEY</span>). It covers every local's data, so this is a platform function, never
 a committee one. It contains <strong>no</strong> key shares and no plaintext election key, so it
 cannot be used to open ballots. Restore with <span class="mono">scripts/decrypt-backup.js</span>.
 Each local's own retention record is its per-election archive above.</p>

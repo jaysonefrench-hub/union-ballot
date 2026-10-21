@@ -1,6 +1,6 @@
 <%- include('../partials/head') %>
 <div class="ballot-head"><div class="bar"></div><div class="hairlines"></div></div>
-<p class="eyebrow">Shown exactly once: the system keeps only a hash</p>
+<p class="eyebrow">Shown exactly once · the system keeps only a hash</p>
 <h1>Reset link for <%= account.username %></h1>
 <div class="notice warn">
   <strong>Deliver this link to the account holder yourself</strong>, over a channel you trust
@@ -13,9 +13,9 @@
 </div>
 <p>Link to deliver:</p>
 <p class="mono" style="word-break:break-all"><%= resetUrl %></p>
-<p class="sub">The account holder chooses their own new password on that page. No password (old
-or new) is ever emailed, displayed, or stored in plaintext, and this link cannot be retrieved
+<p class="sub">The account holder chooses their own new password on that page. No password, old
+or new, is ever emailed, displayed, or stored in plaintext, and this link cannot be retrieved
 again. The generation of this link is recorded in the tamper-evident audit log (the link itself
 is not).</p>
-<a class="btn primary" href="/platform">Done. I have delivered this link</a>
+<a class="btn primary" href="/platform">Done, I have delivered this link</a>
 <%- include('../partials/foot') %>

@@ -39,7 +39,7 @@ function checkEmailSyntax(raw) {
   const email = String(raw);
   const fail = (reason) => ({ ok: false, reason });
 
-  if (/\s/.test(email)) return fail('contains a space (email addresses cannot contain spaces)');
+  if (/\s/.test(email)) return fail('contains a space, and email addresses cannot contain spaces');
 
   const atCount = (email.match(/@/g) || []).length;
   if (atCount === 0) return fail('missing the "@" sign');
@@ -47,7 +47,7 @@ function checkEmailSyntax(raw) {
 
   const [local, domain] = email.split('@');
   if (!local) return fail('nothing before the "@" sign');
-  if (!domain) return fail('nothing after the "@" sign (the domain is missing)');
+  if (!domain) return fail('nothing after the "@" sign, the domain is missing');
   if (email.length > 254 || local.length > 64) return fail('too long to be a deliverable address');
 
   if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) {
@@ -58,7 +58,7 @@ function checkEmailSyntax(raw) {
   }
 
   if (!domain.includes('.')) {
-    return fail(`the domain "${domain}" has no ending (a deliverable address ends in .com, .org, .net, .us, …)`);
+    return fail(`the domain "${domain}" has no ending; a deliverable address ends in .com, .org, .net, .us, …`);
   }
   const labels = domain.split('.');
   if (labels.some((l) => l === '')) {
@@ -72,7 +72,7 @@ function checkEmailSyntax(raw) {
   }
   const tld = labels[labels.length - 1];
   if (!TLD_RE.test(tld)) {
-    return fail(`the domain ending ".${tld}" is not a valid ending (it should be letters, like .com, .org or .us)`);
+    return fail(`the domain ending ".${tld}" is not a valid ending; it should be letters, like .com, .org or .us`);
   }
 
   return { ok: true };

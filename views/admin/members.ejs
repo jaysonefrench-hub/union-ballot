@@ -6,7 +6,7 @@
 
 <div class="notice">
   <strong>Email verification.</strong> A member on the electronic path must confirm their email address
-  (by clicking a one-time link) before any voting credential can be sent to it: this proves the address
+  (by clicking a one-time link) before any voting credential can be sent to it. This proves the address
   is real, reachable, and theirs. Paper-ballot members never need to verify anything.
   <% if (!smtp) { %> SMTP is not configured, so links are not emailed automatically: use
   <em>Send link</em> on a row to get a one-time verification link for manual delivery.<% } %>
@@ -14,7 +14,7 @@
 
 <h2>Import members</h2>
 <p class="sub">Email addresses are checked for valid format at import. Rows with an address that cannot receive
-mail as written (missing @, missing .com/.org ending, spaces, …) are <strong>not</strong> imported: they come back
+mail as written (missing @, missing .com/.org ending, spaces, …) are <strong>not</strong> imported. They come back
 on an import report with the reason per row, so you can fix and re-import exactly those rows. A blank email is
 fine: that member uses the paper-ballot method.</p>
 <form method="post" action="/admin/members/import">

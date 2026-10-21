@@ -69,6 +69,17 @@ function beginEmailVerification(memberId) {
   return `${BASE_URL()}/verify-email?token=${token}`;
 }
 
+/**
+ * Reply-To for member-facing mail: the committee's own recovery email when
+ * one is on file for this local, so a member's reply reaches a person. The
+ * sending address (MAIL_FROM) is unchanged. Returns undefined when no
+ * committee account has an email, and the Reply-To header is then omitted.
+ */
+function committeeReplyTo(localId) {
+  const row = db.prepare("SELECT email FROM users WHERE local_id=? AND role='admin' AND email IS NOT NULL AND email!='' ORDER BY id LIMIT 1").get(localId);
+  return row ? row.email : undefined;
+}
+
 /** Election WITH its races/candidates — only if it belongs to this local
  * (throws a 404 otherwise; tenant.getElection carries the local_id check). */
 function getElection(localId, id) {
@@ -228,7 +239,7 @@ module.exports = function adminRoutes({ flash }) {
         for (const m of withEmail) {
           const verifyUrl = beginEmailVerification(m.id);
           try {
-            await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl });
+            await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
             sent++;
           } catch (err) { failures.push(`${m.name} <${m.email}>: ${err.message}`); }
         }
@@ -249,10 +260,10 @@ module.exports = function adminRoutes({ flash }) {
       if (smtpConfigured() && withEmail.length > 0) {
         flash(req, failures.length ? 'error' : 'ok',
           `${added} member(s) added. Verification links emailed to ${sent} member(s)`
-          + (failures.length ? `; ${failures.length} failed. Use Resend on those rows.` : '. Electronic credentials can only be issued to verified addresses.'));
+          + (failures.length ? `; ${failures.length} failed (use Resend on those rows).` : '. Electronic credentials can only be issued to verified addresses.'));
       } else {
         flash(req, 'ok', `${added} member(s) added.`
-          + (withEmail.length ? ` ${withEmail.length} have an email address and must confirm it before electronic credentials can be issued${smtpConfigured() ? '' : ' (SMTP is not configured: use "Send link" on each row to get a one-time verification link for manual delivery)'}.` : ''));
+          + (withEmail.length ? ` ${withEmail.length} have an email address and must confirm it before electronic credentials can be issued${smtpConfigured() ? '' : ' (SMTP is not configured; use "Send link" on each row to get a one-time verification link for manual delivery)'}.` : ''));
       }
       res.redirect('/admin/members');
     } catch (err) { next(err); }
@@ -291,13 +302,13 @@ module.exports = function adminRoutes({ flash }) {
       if (emailChanged && newEmail && smtpConfigured()) {
         const verifyUrl = beginEmailVerification(m.id);
         try {
-          await sendVerificationEmail({ to: newEmail, memberName: m.name, verifyUrl });
+          await sendVerificationEmail({ to: newEmail, memberName: m.name, verifyUrl, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
           flash(req, 'ok', `Saved. ${m.name}'s email changed, so a new verification link was emailed to ${newEmail}.`);
         } catch (err) {
           flash(req, 'error', `Saved, but the verification email to ${newEmail} failed (${err.message}). Use Resend on the row.`);
         }
       } else if (emailChanged && newEmail) {
-        flash(req, 'ok', `Saved. ${m.name}'s email changed and is unverified. Send them a new verification link before issuing electronic credentials.`);
+        flash(req, 'ok', `Saved. ${m.name}'s email changed and is unverified; send them a new verification link before issuing electronic credentials.`);
       }
       res.redirect('/admin/members');
     } catch (err) { next(err); }
@@ -313,7 +324,7 @@ module.exports = function adminRoutes({ flash }) {
 
       const verifyUrl = beginEmailVerification(m.id);
       if (smtpConfigured()) {
-        await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl });
+        await sendVerificationEmail({ to: m.email, memberName: m.name, verifyUrl, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
         audit(req.localId, req.session.user.username, 'roster.verification_email_sent', `Verification link (re)sent to member #${m.id} (${m.name}); any previous link is now invalid`);
         flash(req, 'ok', `Verification link emailed to ${m.name} <${m.email}>. Any earlier link no longer works.`);
         res.redirect('/admin/members');
@@ -458,6 +469,21 @@ module.exports = function adminRoutes({ flash }) {
     });
   });
 
+  /* ---------------- ballot preview (read-only, any status) ----------------
+   * Renders the EXACT voter ballot template (views/ballot.ejs) in preview
+   * mode, so what the committee proofreads can never drift from what voters
+   * see. Available in every status, including draft and before credentials
+   * exist. Strictly read-only: no credential is checked, created, or
+   * redeemed; no ballot, turnout, or key row is touched. Only the audit
+   * entry below is written. */
+  router.get('/elections/:id/preview', (req, res) => {
+    const e = getElection(req.localId, req.params.id);
+    audit(req.localId, req.session.user.username, 'election.ballot_previewed',
+      `Election #${e.id} "${e.title}": ballot previewed by the committee (read-only; no credential, ballot, or turnout record involved)`);
+    markTestElectionBanner(res, e);
+    res.render('ballot', { title: `Ballot preview: ${e.title}`, election: e, races: e.races, preview: true });
+  });
+
   /* ---------------- DEMO skip-email-verify toggle (TEST elections only) ---- */
   router.post('/elections/:id/demo-skip-email-verify', (req, res) => {
     const e = getElection(req.localId, req.params.id);
@@ -553,7 +579,7 @@ module.exports = function adminRoutes({ flash }) {
         let sent = 0; const failures = [];
         for (const { member, credential } of issued) {
           try {
-            await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at });
+            await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
             sent++;
           } catch (err) { failures.push(`${member.name} <${member.email}>: ${err.message}`); }
         }
@@ -615,7 +641,7 @@ module.exports = function adminRoutes({ flash }) {
       const reissueKey = getReissueKey();
       const rows = db.prepare('SELECT * FROM credentials WHERE election_id=? AND voided=0').all(e.id);
       const own = rows.find((c) => { try { return Number(aesDecrypt(c.member_ref, reissueKey)) === memberId; } catch { return false; } });
-      if (own && own.redeemed) { flash(req, 'error', `${member.name}'s credential was already used to cast a ballot; it cannot be reissued. If the member disputes this, treat it as a security incident.`); audit(req.localId, req.session.user.username, 'election.reissue_blocked', `Election #${e.id}: reissue for member #${memberId} blocked: credential already redeemed`); return res.redirect(`/admin/elections/${e.id}`); }
+      if (own && own.redeemed) { flash(req, 'error', `${member.name}'s credential was already used to cast a ballot; it cannot be reissued. If the member disputes this, treat it as a security incident.`); audit(req.localId, req.session.user.username, 'election.reissue_blocked', `Election #${e.id}: reissue for member #${memberId} blocked, credential already redeemed`); return res.redirect(`/admin/elections/${e.id}`); }
 
       const credential = generateCredential();
       const salt = randomHex(16);
@@ -633,7 +659,7 @@ module.exports = function adminRoutes({ flash }) {
       const emailOk = !!(member.email && checkEmailSyntax(member.email).ok);
       const canEmailCred = smtpConfigured() && emailOk && (member.email_verified || electionSkipsEmailVerify(e));
       if (canEmailCred) {
-        await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at });
+        await sendCredentialEmail({ to: member.email, memberName: member.name, electionTitle: e.title, credential, voteUrl, closesAt: e.closes_at, localName: req.local.name, replyTo: committeeReplyTo(req.localId) });
         flash(req, 'ok', `A replacement credential was emailed to ${member.name}. The previous credential no longer works.`);
         res.redirect(`/admin/elections/${e.id}`);
       } else {
@@ -822,7 +848,7 @@ module.exports = function adminRoutes({ flash }) {
       /* Integrity check: sealed ballots must equal redeemed credentials. */
       const redeemed = db.prepare('SELECT COUNT(*) AS n FROM credentials WHERE election_id=? AND redeemed=1').get(e.id).n;
       if (rows.length !== redeemed) {
-        audit(req.localId, req.session.user.username, 'tally.INTEGRITY_ALERT', `Election #${e.id}: ballot count (${rows.length}) does not match redeemed credentials (${redeemed}). Investigate before certifying`);
+        audit(req.localId, req.session.user.username, 'tally.INTEGRITY_ALERT', `Election #${e.id}: ballot count (${rows.length}) does not match redeemed credentials (${redeemed}); investigate before certifying`);
       }
 
       /* Shuffle before decrypting so even the ceremony reveals no order. */
@@ -982,7 +1008,7 @@ module.exports = function adminRoutes({ flash }) {
       try {
         const rec = writeSealedArchive(e.id, req.localId);
         audit(req.localId, req.session.user.username, 'election.archive_stored',
-          `Election #${e.id}: sealed records archive stored automatically as ${rec.filename} (${rec.encrypted ? 'AES-256-GCM under BACKUP_KEY' : 'plaintext JSON: set BACKUP_KEY to encrypt archives at rest'}; ${rec.ballot_count} encrypted ballots; sha256 ${rec.sha256})`);
+          `Election #${e.id}: sealed records archive stored automatically as ${rec.filename} (${rec.encrypted ? 'AES-256-GCM under BACKUP_KEY' : 'plaintext JSON; set BACKUP_KEY to encrypt archives at rest'}; ${rec.ballot_count} encrypted ballots; sha256 ${rec.sha256})`);
       } catch (archiveErr) {
         console.error('[archive] automatic records archive failed:', archiveErr.message);
         audit(req.localId, req.session.user.username, 'election.archive_store_failed',

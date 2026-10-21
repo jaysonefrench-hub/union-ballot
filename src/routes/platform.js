@@ -378,7 +378,7 @@ module.exports = function platformRoutes({ flash }) {
       /* Feedback is fine here (this caller is authenticated), but the
        * submitted value still stays out of the permanent log. */
       audit(null, `platform:${req.platformAdmin.username}`, 'platform.reset_link_rejected', 'One-time reset link requested for an unknown account (submitted name not recorded)');
-      flash(req, 'error', 'No committee or observer account has that exact username. Ask the local to confirm it (usernames are case-sensitive).');
+      flash(req, 'error', 'No committee or observer account has that exact username. Ask the local to confirm it; usernames are case-sensitive.');
       return res.redirect('/platform');
     }
     const resetUrl = beginPasswordReset(u.id);

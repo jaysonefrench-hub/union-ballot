@@ -8,7 +8,8 @@
     "start": "node server.js",
     "smoke": "node scripts/mailer-mime-test.js && node scripts/smoke-test.js",
     "test:regressions": "node scripts/regression-test.js",
-    "test": "npm run smoke && npm run test:regressions"
+    "test:preview": "node scripts/preview-test.js",
+    "test": "npm run smoke && npm run test:regressions && npm run test:preview"
   },
   "engines": { "node": ">=18" },
   "dependencies": {
