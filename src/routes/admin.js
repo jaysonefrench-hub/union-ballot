@@ -54,7 +54,7 @@ const PERC_BLOCK_MESSAGE =
   'Blocked: a binding electronic contract-ratification vote for a Florida unit cannot be created here. '
   + 'Florida Administrative Code 60CC-4.002 requires ratification by secret ballot at a meeting or by mail ballot with a publicly announced count, '
   + 'and PERC has denied requests to conduct ratification electronically (May 2022 denials); there is no general PERC approval of electronic ratification voting. '
-  + 'Use a meeting or mail ballot, mark this vote as a TEST election, or — only if your unit actually holds a current PERC variance permitting electronic ratification — '
+  + 'Use a meeting or mail ballot, mark this vote as a TEST election, or (only if your unit actually holds a current PERC variance permitting electronic ratification) '
   + 'check the variance acknowledgment on the form. This system does not verify or grant PERC approval.';
 
 /**
@@ -406,7 +406,7 @@ module.exports = function adminRoutes({ flash }) {
     })();
 
     audit(req.localId, req.session.user.username, 'election.created',
-      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''} — not verified by this system` : ''}${demoSkip ? '; DEMO skip-email-verify ON (TEST dry-run)' : ''}`);
+      `Election #${electionId} "${title.trim()}" (${kind}${isTest ? ', TEST' : ''}, jurisdiction ${jurisdiction}) created; ballot key split ${threshold}-of-${sharesTotal}; keyholders: ${keyholders.join('; ') || 'not recorded'}${percAck ? `; committee recorded its claim of a current Florida PERC variance for electronic ratification${percRef ? ` (ref: ${percRef})` : ''}, not verified by this system` : ''}${demoSkip ? '; DEMO skip-email-verify ON (TEST dry-run)' : ''}`);
 
     /* Shares are displayed exactly once and never stored. */
     if (isTest) markTestElectionBanner(res, { is_test: 1 });
@@ -486,7 +486,7 @@ module.exports = function adminRoutes({ flash }) {
       if (e.status !== 'draft') { flash(req, 'error', 'Credentials were already issued for this vote.'); return res.redirect(`/admin/elections/${e.id}`); }
       if (percRatificationBlocked({ jurisdiction: e.jurisdiction, kind: e.kind, isTest: e.is_test, varianceAck: e.perc_variance_ack })) {
         audit(req.localId, req.session.user.username, 'election.credential_issue_blocked_perc',
-          `Election #${e.id} "${e.title}": credential issuance blocked — binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
+          `Election #${e.id} "${e.title}": credential issuance blocked: binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
         flash(req, 'error', PERC_BLOCK_MESSAGE);
         return res.redirect(`/admin/elections/${e.id}`);
       }
@@ -651,7 +651,7 @@ module.exports = function adminRoutes({ flash }) {
      * covering elections created before this gate existed (or edited rows). */
     if (percRatificationBlocked({ jurisdiction: e.jurisdiction, kind: e.kind, isTest: e.is_test, varianceAck: e.perc_variance_ack })) {
       audit(req.localId, req.session.user.username, 'election.open_blocked_perc',
-        `Election #${e.id} "${e.title}": opening blocked — binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
+        `Election #${e.id} "${e.title}": opening blocked: binding Florida electronic contract ratification without a recorded PERC variance acknowledgment (FAC 60CC-4.002)`);
       flash(req, 'error', PERC_BLOCK_MESSAGE);
       return res.redirect(`/admin/elections/${e.id}`);
     }
