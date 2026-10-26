@@ -13,15 +13,41 @@
 </div>
 
 <h2>Import members</h2>
+<p><a class="btn" href="/admin/members/roster-template.csv" download>Download CSV template</a></p>
+<p class="sub">Bulk-loading the whole roster? Download the template, fill it in with Excel or Google Sheets
+(one member per line: name, email, member number), save it as CSV, then choose the file below. Leave the
+email cell blank for a member who votes by the paper-ballot method.
+<% if (smtp) { %>Importing sends every member with an email address their confirmation link right away, so
+import the roster well before the election, and tell members to check their Promotions and Spam folders
+for a message from the election committee.<% } else { %>Each member with an email address must confirm it
+before electronic credentials can be issued; SMTP is not configured, so use <em>Send link</em> on each row
+to get their one-time confirmation link for manual delivery.<% } %></p>
 <p class="sub">Email addresses are checked for valid format at import. Rows with an address that cannot receive
 mail as written (missing @, missing .com/.org ending, spaces, …) are <strong>not</strong> imported. They come back
 on an import report with the reason per row, so you can fix and re-import exactly those rows. A blank email is
 fine: that member uses the paper-ballot method.</p>
 <form method="post" action="/admin/members/import">
-  <label for="roster">One member per line: <span class="mono">Name, email, member number</span> (email and number optional)</label>
+  <label for="rosterfile">Upload the filled-in CSV file (it loads into the box below for review):</label>
+  <input type="file" id="rosterfile" accept=".csv,text/csv,text/plain">
+  <label for="roster">Or paste rows, one member per line: <span class="mono">Name, email, member number</span> (email and number optional)</label>
   <textarea id="roster" name="roster" rows="6" placeholder="Jane Smith, jsmith@example.com, 1042&#10;Bob Jones, , 1043"></textarea>
   <button class="btn" type="submit">Add to roster</button>
 </form>
+<script>
+  /* Load a chosen CSV into the paste box so the committee can look the rows
+   * over before submitting. The server parses exactly one path either way. */
+  (function () {
+    var fileInput = document.getElementById('rosterfile');
+    var box = document.getElementById('roster');
+    fileInput.addEventListener('change', function () {
+      var f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () { box.value = String(reader.result || ''); };
+      reader.readAsText(f);
+    });
+  })();
+</script>
 
 <h2>Roster (<%= members.length %>)</h2>
 <table>

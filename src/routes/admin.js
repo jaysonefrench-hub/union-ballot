@@ -27,6 +27,7 @@ const {
 } = require('../crypto');
 const { smtpConfigured, sendCredentialEmail, sendVerificationEmail } = require('../mailer');
 const { checkEmailSyntax } = require('../email-syntax');
+const { TEMPLATE_FILENAME, TEMPLATE_CSV, parseRosterText } = require('../roster-csv');
 const { buildArchive, writeSealedArchive } = require('../archives');
 const {
   electionSkipsEmailVerify, markTestElectionBanner, demoSkipForCreate,
@@ -180,6 +181,15 @@ module.exports = function adminRoutes({ flash }) {
     res.render('admin/members', { title: 'Member roster', members, smtp: smtpConfigured() });
   });
 
+  /* Blank roster template for bulk import. Static example content only (no
+   * member data), but it still sits behind the committee session like every
+   * other roster page, so nothing under /admin is ever reachable without one. */
+  router.get('/members/roster-template.csv', (req, res) => {
+    res.type('text/csv');
+    res.set('Content-Disposition', `attachment; filename="${TEMPLATE_FILENAME}"`);
+    res.send(TEMPLATE_CSV);
+  });
+
   router.post('/members/import', async (req, res, next) => {
     try {
       /*
@@ -194,21 +204,23 @@ module.exports = function adminRoutes({ flash }) {
        * well-formed address is real and the member's own is still proven only
        * by the magic-link verification flow.
        */
-      const rawLines = String(req.body.roster || '').split(/\r?\n/);
+      /* parseRosterText (src/roster-csv.js) accepts the downloadable template
+       * exactly as Excel or Google Sheets hands it back: it strips a UTF-8
+       * BOM, takes CRLF/CR/LF endings, honors quoted fields with embedded
+       * commas, and skips the header row, blank lines, and all-empty ",,"
+       * padding rows. Hand-pasted "Name, email, number" lines parse exactly
+       * as before. */
       const valid = [];    // { name, email|null, num|null }
       const rejected = []; // { line, raw, name, email, reason }
-      rawLines.forEach((rawLine, idx) => {
-        const line = rawLine.trim();
-        if (!line) return; // blank line — not data, nothing to report
-        const [name, email, num] = line.split(',').map((s) => (s || '').trim());
+      parseRosterText(req.body.roster).forEach(({ line, raw, name, email, num }) => {
         if (!name) {
-          rejected.push({ line: idx + 1, raw: line, name: '', email: email || '', reason: 'missing the member name (format: Name, email, member number)' });
+          rejected.push({ line, raw, name: '', email: email || '', reason: 'missing the member name (format: Name, email, member number)' });
           return;
         }
         if (email) {
           const check = checkEmailSyntax(email);
           if (!check.ok) {
-            rejected.push({ line: idx + 1, raw: line, name, email, reason: check.reason });
+            rejected.push({ line, raw, name, email, reason: check.reason });
             return;
           }
         }

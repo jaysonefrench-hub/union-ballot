@@ -436,6 +436,57 @@ function decryptSealed(buf, keyHex) {
     await req('POST', `/admin/members/${olive.id}/update`, { email: '', good_standing: '1', needs_paper_ballot: '0' }, chairJar);
     assert.strictEqual(db.prepare('SELECT email FROM members WHERE id=?').get(olive.id).email, null, 'clearing the email (paper path) still allowed');
 
+    /* 15b. ROSTER CSV TEMPLATE — downloadable from the roster page (committee
+     * session only, no member data), and the importer accepts the template
+     * exactly as Excel hands it back: BOM, CRLF, quoted fields with embedded
+     * commas, header row skipped, ",," padding and trailing blank lines
+     * tolerated. */
+    r = await req('GET', '/admin/members', null, chairJar);
+    assert.ok(r.text.includes('Download CSV template'), 'roster page shows the template download button');
+    assert.ok(r.text.includes('/admin/members/roster-template.csv'), 'download button points at the template route');
+    assert.ok(r.text.includes('rosterfile'), 'roster page offers a CSV file picker next to the paste box');
+    assert.ok(r.text.includes('Promotions and Spam') || r.text.includes('Send link'),
+      'help text covers the confirmation-link timing advice (or the no-SMTP path)');
+
+    r = await req('GET', '/admin/members/roster-template.csv', null, null);
+    assert.strictEqual(r.status, 302, 'template download without a session is refused (redirects to sign-in)');
+    const tplResp = await fetch(BASE + '/admin/members/roster-template.csv', { headers: { Cookie: chairJar.cookie }, redirect: 'manual' });
+    assert.strictEqual(tplResp.status, 200, 'committee session downloads the template');
+    assert.ok((tplResp.headers.get('content-type') || '').includes('text/csv'), 'template served as text/csv');
+    assert.ok((tplResp.headers.get('content-disposition') || '').includes('roster-template.csv'), 'template served as an attachment');
+    const tplText = await tplResp.text();
+    assert.ok(tplText.startsWith('Name,Email,Member number'), 'template header row matches what the importer expects');
+    assert.ok(tplText.includes('\r\n'), 'template uses CRLF line endings (Excel convention)');
+    const tplLines = tplText.trim().split('\r\n');
+    assert.ok(tplLines.length >= 3 && tplLines.length <= 4, 'template has 2 or 3 example rows');
+    assert.ok(tplLines.slice(1).every((l) => l.includes('@example.com') || /^[^,]+,,/.test(l)),
+      'every example email is an example.com address');
+    assert.ok(tplLines.slice(1).some((l) => /^[^,]+,,/.test(l)), 'one example row has a blank email (paper-ballot case)');
+    assert.ok(!tplText.includes('\u2014'), 'no em dash in the template');
+    for (const pii of ['Alice A', 'a@x.test', 'Hank H', 'hank@example.org']) {
+      assert.ok(!tplText.includes(pii), `template carries no member data (${pii})`);
+    }
+
+    /* Import the template VERBATIM as Excel would save it: BOM + header +
+     * CRLF, plus a quoted row with an embedded comma, an all-empty padding
+     * row, and trailing blank lines. */
+    const beforeTpl = db.prepare('SELECT COUNT(*) n FROM members').get().n;
+    r = await req('POST', '/admin/members/import', {
+      roster: '\uFEFF' + tplText + '"Example, Pat",pat@example.com,1004\r\n,,\r\n\r\n',
+    }, chairJar);
+    assert.strictEqual(r.status, 302, 'template import is clean (no report page, no rejected rows)');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM members').get().n, beforeTpl + 4,
+      'the three example rows and the quoted row imported; header, padding, and blank lines did not');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM members WHERE name=?').get('Name').n, 0, 'header row was not imported as a member');
+    assert.strictEqual(db.prepare('SELECT email FROM members WHERE name=?').get('Bob Example').email, null,
+      'blank-email example row imported on the paper path');
+    assert.strictEqual(db.prepare('SELECT email FROM members WHERE name=?').get('Jane Example').email, 'jane@example.com',
+      'example row with email imported, pending verification');
+    const quoted = db.prepare('SELECT * FROM members WHERE name=?').get('Example, Pat');
+    assert.ok(quoted, 'quoted name with an embedded comma imported as one field');
+    assert.strictEqual(quoted.email, 'pat@example.com', 'fields after a quoted name land in the right columns');
+    assert.strictEqual(quoted.member_number, '1004', 'member number after a quoted name intact');
+
     /* 16. PLATFORM DASHBOARD — platform accounts only, counts only, no PII.
      * An ordinary committee session must NOT open it; only a platform
      * administrator sign-in does. */
